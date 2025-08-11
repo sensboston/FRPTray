@@ -1,0 +1,3 @@
+Key (Base64): qUEpGDPK/+ftBlq4ThCDQvuPOdHsQnsnp2KtEJsuN+k=
+IV  (Base64): JLlT8v+R+wUJH3PvF/D1wQ==
+File: frpc.enc

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -11,7 +12,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using Timer = System.Threading.Timer;
-using System.Collections.Generic;
+ 
 
 namespace FRPTray
 {

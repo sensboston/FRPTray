@@ -388,7 +388,7 @@ namespace FRPTray
             return Regex.Replace(text, @"\x1B\[[0-9;]*[mK]", "");
         }
 
-        private void OnShowStatusClicked(object sender, EventArgs e)
+        public string GetCurrentLogText()
         {
             string mapping;
             try
@@ -402,21 +402,23 @@ namespace FRPTray
             }
             catch { mapping = "(not configured)"; }
 
-            string text;
             lock (logLock)
             {
-                text =
-                    "Status: " + statusText + Environment.NewLine +
-                    "Tunnels:" + Environment.NewLine +
-                    mapping + Environment.NewLine +
-                    "Network: " + (networkAvailable ? "available" : "unavailable") + 
-                    Environment.NewLine + Environment.NewLine +
-                    "---- Last log lines ----" + Environment.NewLine +
-                    RemoveAnsiEscapes(logBuffer.ToString());
+                return "Status: " + statusText + Environment.NewLine +
+                       "Tunnels:" + Environment.NewLine +
+                       mapping + Environment.NewLine +
+                       "Network: " + (networkAvailable ? "available" : "unavailable") +
+                       Environment.NewLine + Environment.NewLine +
+                       "---- Last log lines ----" + Environment.NewLine +
+                       RemoveAnsiEscapes(logBuffer.ToString());
             }
+        }
 
-            using (var dlg = new StatusDialog(text))
-                dlg.ShowDialog();
+        private void OnShowStatusClicked(object sender, EventArgs e)
+        {
+            string initialText = GetCurrentLogText();
+            var dlg = new StatusDialog(initialText, this); 
+            dlg.Show();
         }
 
         private void RebuildCopyMenu()

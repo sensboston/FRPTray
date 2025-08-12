@@ -26,9 +26,9 @@ namespace FRPTray.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("1433")]
-        public int LocalPort {
+        public string LocalPort {
             get {
-                return ((int)(this["LocalPort"]));
+                return ((string)(this["LocalPort"]));
             }
             set {
                 this["LocalPort"] = value;
@@ -38,9 +38,9 @@ namespace FRPTray.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("24000")]
-        public int RemotePort {
+        public string RemotePort {
             get {
-                return ((int)(this["RemotePort"]));
+                return ((string)(this["RemotePort"]));
             }
             set {
                 this["RemotePort"] = value;

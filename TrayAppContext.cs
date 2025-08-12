@@ -1,18 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using Microsoft.Win32;
 using Timer = System.Threading.Timer;
- 
 
 namespace FRPTray
 {
@@ -26,11 +22,13 @@ namespace FRPTray
         private ToolStripMenuItem stopItem;
         private ToolStripMenuItem statusItem;
         private ToolStripMenuItem copyUrlRootItem;
-        private Process frpcProcess;
-        private string configPath;
-        private string frpcPath;
+
         private Icon grayIcon;
         private Icon greenIcon;
+
+        private Process frpcProcess;
+        private string frpcPath;
+        private string configPath;
 
         private string statusText = "not connected";
         private readonly StringBuilder logBuffer = new StringBuilder(8192);
@@ -40,21 +38,18 @@ namespace FRPTray
         private volatile bool userWantsRunning;
         private volatile bool shuttingDown;
         private volatile bool networkAvailable = true;
-        private int reconnectBackoffMs = 1000;
-
-        private const string FrpcKeyB64 = "qUEpGDPK/+ftBlq4ThCDQvuPOdHsQnsnp2KtEJsuN+k=";
-        private const string FrpcIvB64 = "JLlT8v+R+wUJH3PvF/D1wQ==";
-        private const string FrpcResourceName = "FRPTray.frpc.enc";
 
         private readonly Random rng = new Random();
+        private int reconnectBackoffMs = 1000;
         private DateTime nextAllowedStartUtc = DateTime.MinValue;
 
         public TrayAppContext()
         {
+            FrpProcess.KillStaleFrpcProcesses();
             uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
-            grayIcon = CreateStatusIcon(Color.Gray);
-            greenIcon = CreateStatusIcon(Color.Lime);
+            grayIcon = TrayIcons.CreateStatusIcon(Color.Gray);
+            greenIcon = TrayIcons.CreateStatusIcon(Color.Lime);
 
             startItem = new ToolStripMenuItem("Start tunnel", null, OnStartClicked);
             stopItem = new ToolStripMenuItem("Stop tunnel", null, OnStopClicked) { Enabled = false };
@@ -64,11 +59,9 @@ namespace FRPTray
             statusItem = new ToolStripMenuItem("Status: not connected") { Enabled = false };
 
             var menu = new ContextMenuStrip();
-
             versionLabel = new HeaderLabel(GetVersionText());
             menu.Items.Add(versionLabel);
             menu.Items.Add(new ToolStripSeparator());
-
             menu.Items.Add(startItem);
             menu.Items.Add(stopItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -91,15 +84,13 @@ namespace FRPTray
             {
                 if (e.Button == MouseButtons.Left)
                 {
-                    if (IsProcessRunning(frpcProcess))
-                        OnStopClicked(this, EventArgs.Empty);
-                    else
-                        OnStartClicked(this, EventArgs.Empty);
+                    if (FrpProcess.IsProcessRunning(frpcProcess)) OnStopClicked(this, EventArgs.Empty);
+                    else OnStartClicked(this, EventArgs.Empty);
                 }
             };
 
             NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
-            healthTimer = new System.Threading.Timer(OnHealthTimer, null, Timeout.Infinite, Timeout.Infinite);
+            healthTimer = new Timer(OnHealthTimer, null, Timeout.Infinite, Timeout.Infinite);
 
             StartupManager.Set(Properties.Settings.Default.RunOnStartup);
             RebuildCopyMenu();
@@ -127,12 +118,11 @@ namespace FRPTray
             }
         }
 
-        private void OnHealthTimer(object state)
+        private void OnHealthTimer(object _)
         {
-            if (shuttingDown) return;
-            if (!userWantsRunning) return;
+            if (shuttingDown || !userWantsRunning) return;
 
-            bool processOk = IsProcessRunning(frpcProcess);
+            bool processOk = FrpProcess.IsProcessRunning(frpcProcess);
             if (!processOk)
             {
                 statusText = "restarting...";
@@ -141,13 +131,12 @@ namespace FRPTray
                 return;
             }
 
-            bool portOk = ProbeRemotePorts();
-            if (!portOk)
+            if (!ProbeRemotePorts())
             {
                 AppendLog("[WARN] health check failed; restarting");
                 statusText = "restarting...";
                 OnUi(() => UpdateStatusUi(false));
-                SafeKillProcess();
+                FrpProcess.SafeKill(frpcProcess);
                 TryStartOrBackoff();
                 return;
             }
@@ -155,9 +144,10 @@ namespace FRPTray
             reconnectBackoffMs = 1000;
             statusText = BuildConnectedText();
             OnUi(() => UpdateStatusUi(true));
-
             try { healthTimer.Change(5000, Timeout.Infinite); } catch { }
         }
+
+        private bool ExistsSafe(string path) => !string.IsNullOrEmpty(path) && File.Exists(path);
 
         private void TryStartOrBackoff()
         {
@@ -170,10 +160,14 @@ namespace FRPTray
                 return;
             }
 
-            if (string.IsNullOrEmpty(frpcPath) || !File.Exists(frpcPath) ||
-                string.IsNullOrEmpty(configPath) || !File.Exists(configPath))
+            if (!ExistsSafe(frpcPath) || !ExistsSafe(configPath))
             {
-                try { PrepareFrpcFiles(); }
+                try
+                {
+                    int[] locals, remotes;
+                    Ports.GetFromSettings(out locals, out remotes);
+                    FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, locals, remotes);
+                }
                 catch (Exception prepEx)
                 {
                     AppendLog("[ERR] prepare failed: " + prepEx.Message);
@@ -185,7 +179,7 @@ namespace FRPTray
             try
             {
                 string message;
-                bool started = TryStartFrpc(out message);
+                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out message);
                 if (started)
                 {
                     reconnectBackoffMs = 1000;
@@ -201,7 +195,7 @@ namespace FRPTray
             }
             catch (Win32Exception ex)
             {
-                bool added = TryOfferAndAddDefenderExclusion(frpcPath, ex);
+                bool added = DefenderExclusion.TryOfferAndAdd(frpcPath, ex, ShowError);
                 if (added)
                 {
                     Thread.Sleep(1500);
@@ -228,7 +222,6 @@ namespace FRPTray
             reconnectBackoffMs = Math.Min(reconnectBackoffMs * 2, 60000);
             int jitter = rng.Next(0, Math.Max(1, reconnectBackoffMs / 3));
             int delay = reconnectBackoffMs + jitter;
-
             nextAllowedStartUtc = DateTime.UtcNow.AddMilliseconds(delay);
             try { healthTimer.Change(delay, Timeout.Infinite); } catch { }
         }
@@ -236,8 +229,7 @@ namespace FRPTray
         private bool ProbeRemotePorts()
         {
             int[] locals, remotes;
-            try { GetPortsFromSettings(out locals, out remotes); }
-            catch { return false; }
+            try { Ports.GetFromSettings(out locals, out remotes); } catch { return false; }
 
             for (int i = 0; i < remotes.Length; i++)
             {
@@ -252,10 +244,7 @@ namespace FRPTray
                         client.EndConnect(ar);
                     }
                 }
-                catch
-                {
-                    return false;
-                }
+                catch { return false; }
             }
             return true;
         }
@@ -264,7 +253,7 @@ namespace FRPTray
         {
             userWantsRunning = true;
 
-            if (IsProcessRunning(frpcProcess))
+            if (FrpProcess.IsProcessRunning(frpcProcess))
             {
                 statusText = BuildConnectedText();
                 OnUi(() => UpdateStatusUi(true));
@@ -274,13 +263,15 @@ namespace FRPTray
 
             try
             {
-                PrepareFrpcFiles();
+                int[] locals, remotes;
+                Ports.GetFromSettings(out locals, out remotes);
+                FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, locals, remotes);
 
                 statusText = "connecting...";
                 OnUi(() => UpdateStatusUi(false));
 
                 string errorMessage;
-                bool started = TryStartFrpc(out errorMessage);
+                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out errorMessage);
                 if (!started)
                 {
                     ShowError("Start failed: " + errorMessage);
@@ -300,7 +291,7 @@ namespace FRPTray
             }
             catch (Win32Exception ex)
             {
-                bool added = TryOfferAndAddDefenderExclusion(frpcPath, ex);
+                bool added = DefenderExclusion.TryOfferAndAdd(frpcPath, ex, ShowError);
                 if (added)
                 {
                     Thread.Sleep(1500);
@@ -325,7 +316,7 @@ namespace FRPTray
         private void OnStopClicked(object sender, EventArgs e)
         {
             userWantsRunning = false;
-            SafeKillProcess();
+            FrpProcess.SafeKill(frpcProcess);
 
             startItem.Enabled = true;
             stopItem.Enabled = false;
@@ -333,7 +324,7 @@ namespace FRPTray
             OnUi(() => UpdateStatusUi(false));
 
             try { healthTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
-            TryDeleteTempFiles();
+            FrpFiles.TryDeleteTemp(frpcPath, configPath);
             RebuildCopyMenu();
         }
 
@@ -345,131 +336,24 @@ namespace FRPTray
             try { healthTimer?.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
             try { healthTimer?.Dispose(); } catch { }
 
-            SafeKillProcess();
-            TryDeleteTempFiles();
+            FrpProcess.SafeKill(frpcProcess);
+            FrpFiles.TryDeleteTemp(frpcPath, configPath);
 
-            try
-            {
-                if (notifyIcon != null)
-                {
-                    notifyIcon.Visible = false;
-                    notifyIcon.Dispose();
-                }
-            }
-            catch { }
-
+            try { if (notifyIcon != null) { notifyIcon.Visible = false; notifyIcon.Dispose(); } } catch { }
             grayIcon?.Dispose();
             greenIcon?.Dispose();
-
             Application.Exit();
         }
 
         private void OnSettingsClicked(object sender, EventArgs e)
         {
-            using (var dlg = new Form())
-            using (var lblLocal = new Label())
-            using (var txtLocal = new TextBox())
-            using (var lblRemote = new Label())
-            using (var txtRemote = new TextBox())
-            using (var lblServer = new Label())
-            using (var txtServer = new TextBox())
-            using (var chkRunStartup = new CheckBox())
-            using (var chkStartOnRun = new CheckBox())
-            using (var btnOk = new Button())
-            using (var btnCancel = new Button())
+            using (var dlg = new SettingsDialog())
             {
-                dlg.Text = "Settings";
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dlg.StartPosition = FormStartPosition.CenterScreen;
-                dlg.ClientSize = new Size(340, 240);
-                dlg.MaximizeBox = false;
-                dlg.MinimizeBox = false;
-                dlg.ShowInTaskbar = false;
-
-                lblLocal.Text = "Local ports (CSV, 1-65535):";
-                lblLocal.AutoSize = true;
-                lblLocal.Location = new Point(10, 10);
-
-                txtLocal.Location = new Point(10, 30);
-                txtLocal.Width = 300;
-                txtLocal.Text = Properties.Settings.Default.LocalPort ?? "";
-
-                lblRemote.Text = "Remote ports (CSV, 1-65535):";
-                lblRemote.AutoSize = true;
-                lblRemote.Location = new Point(10, 60);
-
-                txtRemote.Location = new Point(10, 80);
-                txtRemote.Width = 300;
-                txtRemote.Text = Properties.Settings.Default.RemotePort ?? "";
-
-                lblServer.Text = "Server (IP or host):";
-                lblServer.AutoSize = true;
-                lblServer.Location = new Point(10, 110);
-
-                txtServer.Location = new Point(10, 130);
-                txtServer.Width = 300;
-                txtServer.Text = Properties.Settings.Default.Server;
-
-                chkRunStartup.Text = "Run on Windows startup";
-                chkRunStartup.AutoSize = true;
-                chkRunStartup.Location = new Point(10, 160);
-                chkRunStartup.Checked = Properties.Settings.Default.RunOnStartup;
-
-                chkStartOnRun.Text = "Start tunnel on run";
-                chkStartOnRun.AutoSize = true;
-                chkStartOnRun.Location = new Point(10, 183);
-                chkStartOnRun.Checked = Properties.Settings.Default.StartTunnelOnRun;
-
-                btnOk.Text = "OK";
-                btnOk.DialogResult = DialogResult.OK;
-                btnOk.Location = new Point(170, 205);
-
-                btnCancel.Text = "Cancel";
-                btnCancel.DialogResult = DialogResult.Cancel;
-                btnCancel.Location = new Point(250, 205);
-
-                dlg.Controls.AddRange(new Control[]
-                {
-                    lblLocal, txtLocal, lblRemote, txtRemote, lblServer, txtServer,
-                    chkRunStartup, chkStartOnRun, btnOk, btnCancel
-                });
-                dlg.AcceptButton = btnOk;
-                dlg.CancelButton = btnCancel;
-
                 if (dlg.ShowDialog() != DialogResult.OK) return;
 
-                int[] locals, remotes;
-                try
-                {
-                    locals = ParsePortsCsv((txtLocal.Text ?? "").Trim());
-                    remotes = ParsePortsCsv((txtRemote.Text ?? "").Trim());
-                    if (locals.Length == 0) { ShowError("Invalid Local ports."); return; }
-                    if (remotes.Length == 0) { ShowError("Invalid Remote ports."); return; }
-                    if (locals.Length != remotes.Length) { ShowError("Local/Remote ports count mismatch."); return; }
-                }
-                catch (Exception ex)
-                {
-                    ShowError(ex.Message);
-                    return;
-                }
+                bool wasRunning = FrpProcess.IsProcessRunning(frpcProcess);
 
-                var newServer = (txtServer.Text ?? "").Trim();
-                if (string.IsNullOrEmpty(newServer))
-                {
-                    ShowError("Server cannot be empty.");
-                    return;
-                }
-
-                bool wasRunning = IsProcessRunning(frpcProcess);
-
-                Properties.Settings.Default.LocalPort = (txtLocal.Text ?? "").Trim();
-                Properties.Settings.Default.RemotePort = (txtRemote.Text ?? "").Trim();
-                Properties.Settings.Default.Server = newServer;
-                Properties.Settings.Default.RunOnStartup = chkRunStartup.Checked;
-                Properties.Settings.Default.StartTunnelOnRun = chkStartOnRun.Checked;
-                Properties.Settings.Default.Save();
-
-                StartupManager.Set(chkRunStartup.Checked);
+                StartupManager.Set(Properties.Settings.Default.RunOnStartup);
 
                 if (wasRunning)
                 {
@@ -492,16 +376,13 @@ namespace FRPTray
             try
             {
                 int[] locals, remotes;
-                GetPortsFromSettings(out locals, out remotes);
+                Ports.GetFromSettings(out locals, out remotes);
                 var mb = new StringBuilder();
                 for (int i = 0; i < locals.Length; i++)
                     mb.AppendLine("  127.0.0.1:" + locals[i] + " → " + ServerAddressSetting + ":" + remotes[i]);
                 mapping = mb.ToString().TrimEnd();
             }
-            catch
-            {
-                mapping = "(not configured)";
-            }
+            catch { mapping = "(not configured)"; }
 
             string text;
             lock (logLock)
@@ -515,49 +396,8 @@ namespace FRPTray
                     logBuffer.ToString();
             }
 
-            using (var dlg = new Form())
-            using (var box = new TextBox())
-            using (var copy = new Button())
-            using (var close = new Button())
-            {
-                dlg.Text = "Connection status";
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dlg.StartPosition = FormStartPosition.CenterScreen;
-                dlg.ClientSize = new Size(640, 420);
-                dlg.MaximizeBox = false;
-                dlg.MinimizeBox = false;
-
-                box.Multiline = true;
-                box.ReadOnly = true;
-                box.ScrollBars = ScrollBars.Vertical;
-                box.Font = new Font(FontFamily.GenericMonospace, 9f);
-                box.Location = new Point(10, 10);
-                box.Size = new Size(620, 360);
-                box.Text = text;
-
-                copy.Text = "Copy";
-                copy.Location = new Point(470, 380);
-                copy.Click += (s, ev) =>
-                {
-                    try { Clipboard.SetText(box.Text); } catch { ShowError("Cannot access clipboard."); }
-                };
-
-                close.Text = "Close";
-                close.Location = new Point(550, 380);
-                close.DialogResult = DialogResult.OK;
-
-                dlg.Controls.AddRange(new Control[] { box, copy, close });
-                dlg.AcceptButton = close;
-                dlg.CancelButton = close;
+            using (var dlg = new StatusDialog(text))
                 dlg.ShowDialog();
-            }
-        }
-
-        private sealed class PortPair
-        {
-            public int Local;
-            public int Remote;
-            public PortPair(int local, int remote) { Local = local; Remote = remote; }
         }
 
         private void RebuildCopyMenu()
@@ -568,10 +408,7 @@ namespace FRPTray
             copyUrlRootItem.Tag = null;
 
             int[] locals, remotes;
-            try
-            {
-                GetPortsFromSettings(out locals, out remotes);
-            }
+            try { Ports.GetFromSettings(out locals, out remotes); }
             catch
             {
                 copyUrlRootItem.Text = "Copy public URL";
@@ -597,12 +434,12 @@ namespace FRPTray
                 {
                     int rp = remotes[i];
                     int lp = locals[i];
-                    var item = new ToolStripMenuItem(FormatUrl(lp, rp));
+                    var item = new ToolStripMenuItem(UrlFormatter.Format(ServerAddressSetting, lp, rp));
                     item.Tag = new PortPair(lp, rp);
                     item.Click += (s, e) =>
                     {
                         var pair = (PortPair)((ToolStripMenuItem)s).Tag;
-                        CopyUrlToClipboard(FormatUrl(pair.Local, pair.Remote));
+                        CopyUrlToClipboard(UrlFormatter.Format(ServerAddressSetting, pair.Local, pair.Remote));
                     };
                     copyUrlRootItem.DropDownItems.Add(item);
                 }
@@ -612,247 +449,63 @@ namespace FRPTray
         private void OnCopySingleRootClicked(object sender, EventArgs e)
         {
             var pair = (PortPair)((ToolStripMenuItem)sender).Tag;
-            CopyUrlToClipboard(FormatUrl(pair.Local, pair.Remote));
-        }
-
-        private string FormatUrl(int localPort, int remotePort)
-        {
-            string scheme = "";
-            if (localPort == 80) scheme = "http://";
-            else if (localPort == 443) scheme = "https://";
-            return scheme + ServerAddressSetting + ":" + remotePort;
+            CopyUrlToClipboard(UrlFormatter.Format(ServerAddressSetting, pair.Local, pair.Remote));
         }
 
         private void CopyUrlToClipboard(string url)
         {
-            try { Clipboard.SetText(url); }
-            catch { ShowError("Cannot access clipboard."); }
+            try { Clipboard.SetText(url); } catch { ShowError("Cannot access clipboard."); }
         }
 
-        private bool TryStartFrpc(out string errorMessage)
+        private void OnFrpcOut(string line)
         {
-            errorMessage = null;
-
-            try
+            if (line == null) return;
+            AppendLog("[OUT] " + line);
+            if (line.IndexOf("start proxy success", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                line.IndexOf("login to server success", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                frpcProcess = new Process();
-                frpcProcess.StartInfo.FileName = frpcPath;
-                frpcProcess.StartInfo.Arguments = "-c \"" + configPath + "\"";
-                frpcProcess.StartInfo.UseShellExecute = false;
-                frpcProcess.StartInfo.CreateNoWindow = true;
-                frpcProcess.StartInfo.RedirectStandardOutput = true;
-                frpcProcess.StartInfo.RedirectStandardError = true;
-                frpcProcess.EnableRaisingEvents = true;
-
-                frpcProcess.OutputDataReceived += (s, e) =>
-                {
-                    if (e.Data == null) return;
-                    AppendLog("[OUT] " + e.Data);
-                    if (e.Data.IndexOf("start proxy success", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        e.Data.IndexOf("login to server success", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        statusText = BuildConnectedText();
-                        OnUi(() => UpdateStatusUi(true));
-                    }
-                };
-
-                frpcProcess.ErrorDataReceived += (s, e) =>
-                {
-                    if (e.Data == null) return;
-                    AppendLog("[ERR] " + e.Data);
-                };
-
-                frpcProcess.Exited += (s, ev) =>
-                {
-                    AppendLog("[INFO] frpc exited]");
-                    OnUi(() =>
-                    {
-                        if (shuttingDown) return;
-
-                        startItem.Enabled = true;
-                        stopItem.Enabled = false;
-                        statusText = "not connected";
-                        UpdateStatusUi(false);
-                        TryDeleteTempFiles();
-
-                        if (userWantsRunning)
-                            ScheduleReconnectSoon();
-                    });
-                };
-
-                bool ok = frpcProcess.Start();
-                if (ok)
-                {
-                    frpcProcess.BeginOutputReadLine();
-                    frpcProcess.BeginErrorReadLine();
-                }
-                return ok;
-            }
-            catch (Win32Exception ex)
-            {
-                errorMessage = ex.Message;
-                frpcProcess = null;
-                throw;
-            }
-            catch (Exception ex)
-            {
-                errorMessage = ex.Message;
-                frpcProcess = null;
-                return false;
+                statusText = BuildConnectedText();
+                OnUi(() => UpdateStatusUi(true));
             }
         }
 
-        private void SafeKillProcess()
+        private void OnFrpcErr(string line)
         {
-            var p = frpcProcess;
-            frpcProcess = null;
+            if (line == null) return;
+            AppendLog("[ERR] " + line);
+        }
 
-            try
+        private void OnFrpcExit()
+        {
+            AppendLog("[INFO] frpc exited]");
+            OnUi(() =>
             {
-                if (p != null)
-                {
-                    bool running = IsProcessRunning(p);
-                    if (running)
-                    {
-                        try { p.Kill(); } catch { }
-                        try { p.WaitForExit(2000); } catch { }
-                    }
-                }
-            }
-            catch { }
-            finally
-            {
-                try { if (p != null) p.Dispose(); } catch { }
-            }
-        }
+                if (shuttingDown) return;
 
-        private static bool IsProcessRunning(Process p)
-        {
-            if (p == null) return false;
-            try { return !p.HasExited; }
-            catch (InvalidOperationException) { return false; }
-            catch { return false; }
-        }
+                startItem.Enabled = true;
+                stopItem.Enabled = false;
+                statusText = "not connected";
+                UpdateStatusUi(false);
+                FrpFiles.TryDeleteTemp(frpcPath, configPath);
 
-        private void PrepareFrpcFiles()
-        {
-            frpcPath = ExtractFrpc();
-            configPath = Path.Combine(Path.GetTempPath(), "frpc_" + Guid.NewGuid().ToString("N") + ".ini");
-            File.WriteAllText(configPath, GetFrpcConfig());
-        }
-
-        private string ExtractFrpc()
-        {
-            string tempPath = Path.Combine(
-                Path.GetTempPath(),
-                "frpc_" + Guid.NewGuid().ToString("N") + ".exe"
-            );
-
-            var asm = typeof(TrayAppContext).Assembly;
-            using (var resourceStream = asm.GetManifestResourceStream(FrpcResourceName))
-            {
-                if (resourceStream == null)
-                    throw new InvalidOperationException("Embedded resource not found: " + FrpcResourceName);
-
-                byte[] key = Convert.FromBase64String(FrpcKeyB64);
-                byte[] iv = Convert.FromBase64String(FrpcIvB64);
-
-                using (var aes = Aes.Create())
-                {
-                    aes.Key = key;
-                    aes.IV = iv;
-                    aes.Mode = CipherMode.CBC;
-                    aes.Padding = PaddingMode.PKCS7;
-
-                    using (var decryptor = aes.CreateDecryptor())
-                    using (var crypto = new CryptoStream(resourceStream, decryptor, CryptoStreamMode.Read))
-                    using (var outFile = File.Create(tempPath))
-                    {
-                        crypto.CopyTo(outFile);
-                    }
-                }
-            }
-
-            return tempPath;
-        }
-
-        private void TryDeleteTempFiles()
-        {
-            try { if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath)) File.Delete(configPath); } catch { }
-            try { if (!string.IsNullOrEmpty(frpcPath) && File.Exists(frpcPath)) File.Delete(frpcPath); } catch { }
-        }
-
-        private string GetFrpcConfig()
-        {
-            int[] locals, remotes;
-            GetPortsFromSettings(out locals, out remotes);
-
-            var sb = new StringBuilder();
-            sb.AppendLine("[common]");
-            sb.AppendLine("server_addr = " + ServerAddressSetting);
-            sb.AppendLine("server_port = 7000");
-            sb.AppendLine("token = CHANGE_ME_STRONG_TOKEN");
-            sb.AppendLine();
-
-            for (int i = 0; i < locals.Length; i++)
-            {
-                string name = "frptray-" + (i + 1);
-                sb.AppendLine("[" + name + "]");
-                sb.AppendLine("type = tcp");
-                sb.AppendLine("local_ip = 127.0.0.1");
-                sb.AppendLine("local_port = " + locals[i]);
-                sb.AppendLine("remote_port = " + remotes[i]);
-                sb.AppendLine();
-            }
-            return sb.ToString();
+                if (userWantsRunning) ScheduleReconnectSoon();
+            });
         }
 
         private void ShowError(string message)
         {
-            try
-            {
-                if (notifyIcon != null)
-                    notifyIcon.ShowBalloonTip(3500, "FRPTray", message, ToolTipIcon.Error);
-            }
-            catch { }
-        }
-
-        private static Icon CreateStatusIcon(Color color)
-        {
-            int size = 16;
-            using (var bmp = new Bitmap(size, size))
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.Clear(Color.Transparent);
-                using (var b = new SolidBrush(color))
-                {
-                    g.FillEllipse(b, 2, 2, size - 6, size - 6);
-                }
-                IntPtr hIcon = bmp.GetHicon();
-                try
-                {
-                    return Icon.FromHandle(hIcon);
-                }
-                catch
-                {
-                    return SystemIcons.Application;
-                }
-            }
+            try { notifyIcon?.ShowBalloonTip(3500, "FRPTray", message, ToolTipIcon.Error); } catch { }
         }
 
         private void UpdateStatusUi(bool connected)
         {
             try
             {
-                if (shuttingDown) return;
-                if (notifyIcon == null) return;
-
+                if (shuttingDown || notifyIcon == null) return;
                 notifyIcon.Icon = connected ? greenIcon : grayIcon;
                 notifyIcon.Text = "FRPTray: " + statusText;
-
                 if (startItem != null) startItem.Enabled = !connected;
                 if (stopItem != null) stopItem.Enabled = connected;
-
                 if (statusItem != null) statusItem.Text = "Status: " + statusText;
             }
             catch { }
@@ -860,16 +513,8 @@ namespace FRPTray
 
         private string BuildConnectedText()
         {
-            try
-            {
-                int[] l, r;
-                GetPortsFromSettings(out l, out r);
-                return "connected to " + ServerAddressSetting;
-            }
-            catch
-            {
-                return "not connected";
-            }
+            try { int[] l, r; Ports.GetFromSettings(out l, out r); return "connected to " + ServerAddressSetting; }
+            catch { return "not connected"; }
         }
 
         private string GetVersionText()
@@ -881,28 +526,18 @@ namespace FRPTray
                 string ver = !string.IsNullOrEmpty(verInfo.ProductVersion)
                     ? verInfo.ProductVersion
                     : (!string.IsNullOrEmpty(verInfo.FileVersion) ? verInfo.FileVersion : asm.GetName().Version.ToString());
-
-                DateTime buildTime = File.GetLastWriteTime(asm.Location);
-                return $"  FRPTray {ver} - {buildTime.ToString("yyyy-MM-dd HH:mm")}  ";
+                var buildTime = System.IO.File.GetLastWriteTime(asm.Location);
+                return "  FRPTray " + ver + " - " + buildTime.ToString("yyyy-MM-dd HH:mm") + "  ";
             }
-            catch
-            {
-                return "  FRPTray  ";
-            }
+            catch { return "  FRPTray  "; }
         }
 
         private void OnUi(Action action)
         {
             if (action == null) return;
             var ctx = uiContext;
-            if (ctx != null)
-            {
-                ctx.Post(_ => { try { action(); } catch { } }, null);
-            }
-            else
-            {
-                try { action(); } catch { }
-            }
+            if (ctx != null) ctx.Post(_ => { try { action(); } catch { } }, null);
+            else { try { action(); } catch { } }
         }
 
         private void ScheduleReconnectSoon()
@@ -934,166 +569,10 @@ namespace FRPTray
             }
         }
 
-        private static int[] ParsePortsCsv(string csv)
+        private sealed class PortPair
         {
-            if (string.IsNullOrWhiteSpace(csv)) return new int[0];
-            var parts = csv.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-            var list = new List<int>(parts.Length);
-            for (int i = 0; i < parts.Length; i++)
-            {
-                string p = parts[i].Trim();
-                int v;
-                if (!int.TryParse(p, out v) || v < 1 || v > 65535)
-                    throw new ArgumentException("Invalid port in list: " + p);
-                list.Add(v);
-            }
-            return list.ToArray();
-        }
-
-        private void GetPortsFromSettings(out int[] locals, out int[] remotes)
-        {
-            string lc = Properties.Settings.Default.LocalPort ?? "";
-            string rc = Properties.Settings.Default.RemotePort ?? "";
-
-            locals = ParsePortsCsv(lc);
-            remotes = ParsePortsCsv(rc);
-
-            if (locals.Length == 0 || remotes.Length == 0)
-                throw new InvalidOperationException("Ports are not configured.");
-
-            if (locals.Length != remotes.Length)
-                throw new InvalidOperationException("Local/Remote ports count mismatch.");
-        }
-
-        private bool TryOfferAndAddDefenderExclusion(string processPath, Win32Exception reason)
-        {
-            var answer = MessageBox.Show(
-                "Windows Defender blocked the tunnel helper.\n" +
-                "Add an exclusion for this process and retry?\n\n" +
-                "Path:\n" + processPath + "\n\n" +
-                "You will be asked for admin approval.",
-                "FRPTray",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question);
-
-            if (answer != DialogResult.Yes)
-                return false;
-
-            if (string.IsNullOrWhiteSpace(processPath) || !File.Exists(processPath))
-            {
-                ShowError("Process file not found:\n" + processPath);
-                return false;
-            }
-
-            string tempDir = Path.GetDirectoryName(processPath) ?? Path.GetTempPath();
-            string psScriptPath = Path.Combine(Path.GetTempPath(), "frptray_add_excl.ps1");
-
-            string procEsc = processPath.Replace("'", "''");
-            string dirEsc = tempDir.Replace("'", "''");
-
-            string psScript =
-$@"try {{
-  $ErrorActionPreference = 'Stop'
-  $proc = [IO.Path]::GetFullPath('{procEsc}')
-  $dir  = [IO.Path]::GetFullPath('{dirEsc}')
-  if (Test-Path $proc) {{ Unblock-File -Path $proc -ErrorAction SilentlyContinue }}
-  Add-MpPreference -ExclusionProcess $proc
-  Add-MpPreference -ExclusionPath $dir
-  $p = Get-MpPreference
-  $ok = $false
-  if ($p.ExclusionProcess -contains $proc) {{ $ok = $true }}
-  if (-not $ok -and $p.ExclusionPath -contains $dir) {{ $ok = $true }}
-  if ($ok) {{ exit 0 }} else {{ exit 2 }}
-}} catch {{
-  exit 1
-}}";
-
-            try
-            {
-                File.WriteAllText(psScriptPath, psScript, new UTF8Encoding(false));
-
-                string sysDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
-                string psExe = Path.Combine(sysDir, @"WindowsPowerShell\v1.0\powershell.exe");
-
-                var psi = new ProcessStartInfo
-                {
-                    FileName = psExe,
-                    Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + psScriptPath + "\"",
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-
-                var ps = Process.Start(psi);
-                if (ps == null)
-                    return false;
-
-                ps.WaitForExit();
-                return ps.ExitCode == 0;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                try { if (File.Exists(psScriptPath)) File.Delete(psScriptPath); } catch { }
-            }
-        }
-    }
-
-    static class StartupManager
-    {
-        private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string AppName = "FRPTray";
-
-        public static void Set(bool enable)
-        {
-            try
-            {
-                using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true) ?? Registry.CurrentUser.CreateSubKey(RunKey))
-                {
-                    if (key == null) return;
-                    if (enable)
-                    {
-                        string exe = Application.ExecutablePath;
-                        key.SetValue(AppName, "\"" + exe + "\"");
-                    }
-                    else
-                    {
-                        if (key.GetValue(AppName) != null) key.DeleteValue(AppName, false);
-                    }
-                }
-            }
-            catch { }
-        }
-    }
-
-    internal class HeaderLabel : ToolStripLabel
-    {
-        public HeaderLabel(string text) : base(text)
-        {
-            AutoSize = true;
-            TextAlign = ContentAlignment.MiddleCenter;
-            Padding = new Padding(6);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var backColor = Color.DarkSlateBlue;
-            var foreColor = Color.White;
-
-            using (var b = new SolidBrush(backColor))
-                e.Graphics.FillRectangle(b, e.ClipRectangle);
-
-            TextRenderer.DrawText(
-                e.Graphics,
-                Text,
-                new Font(SystemFonts.MenuFont, FontStyle.Regular),
-                e.ClipRectangle,
-                foreColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
-            );
+            public int Local; public int Remote;
+            public PortPair(int local, int remote) { Local = local; Remote = remote; }
         }
     }
 }

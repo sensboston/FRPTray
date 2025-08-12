@@ -8,26 +8,36 @@ namespace FRPTray
     {
         public SettingsDialog()
         {
+            AutoScaleMode = AutoScaleMode.Dpi;
+
+            float dpiScale = 1.0f;
+            using (var g = CreateGraphics())
+            {
+                dpiScale = g.DpiX / 96f;
+            }
+
+            int Scale(int value) => (int)(value * dpiScale);
+
             Text = "Settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(340, 240);
+            ClientSize = new Size(Scale(340), Scale(240));
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
 
-            var lblLocal = new Label { Text = "Local ports (CSV, 1-65535):", AutoSize = true, Location = new Point(10, 10) };
-            var txtLocal = new TextBox { Location = new Point(10, 30), Width = 300, Text = Properties.Settings.Default.LocalPort ?? "" };
+            var lblLocal = new Label { Text = "Local ports (CSV, 1-65535):", AutoSize = true, Location = new Point(Scale(10), Scale(10)) };
+            var txtLocal = new TextBox { Location = new Point(Scale(10), Scale(30)), Width = Scale(300), Text = Properties.Settings.Default.LocalPort ?? "" };
 
-            var lblRemote = new Label { Text = "Remote ports (CSV, 1-65535):", AutoSize = true, Location = new Point(10, 60) };
-            var txtRemote = new TextBox { Location = new Point(10, 80), Width = 300, Text = Properties.Settings.Default.RemotePort ?? "" };
+            var lblRemote = new Label { Text = "Remote ports (CSV, 1-65535):", AutoSize = true, Location = new Point(Scale(10), Scale(60)) };
+            var txtRemote = new TextBox { Location = new Point(Scale(10), Scale(80)), Width = Scale(300), Text = Properties.Settings.Default.RemotePort ?? "" };
 
-            var lblServer = new Label { Text = "Server (IP or host):", AutoSize = true, Location = new Point(10, 110) };
-            var txtServer = new TextBox { Location = new Point(10, 130), Width = 300, Text = Properties.Settings.Default.Server };
+            var lblServer = new Label { Text = "Server (IP or host):", AutoSize = true, Location = new Point(Scale(10), Scale(110)) };
+            var txtServer = new TextBox { Location = new Point(Scale(10), Scale(130)), Width = Scale(300), Text = Properties.Settings.Default.Server };
 
-            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(10, 160), Checked = Properties.Settings.Default.RunOnStartup };
-            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(10, 183), Checked = Properties.Settings.Default.StartTunnelOnRun };
+            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(160)), Checked = Properties.Settings.Default.RunOnStartup };
+            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(Scale(10), Scale(183)), Checked = Properties.Settings.Default.StartTunnelOnRun };
 
-            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(170, 205) };
-            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(250, 205) };
+            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(Scale(170), Scale(205)), Size = new Size(Scale(75), Scale(23)) };
+            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Scale(250), Scale(205)), Size = new Size(Scale(75), Scale(23)) };
 
             Controls.AddRange(new Control[] { lblLocal, txtLocal, lblRemote, txtRemote, lblServer, txtServer, chkRunStartup, chkStartOnRun, btnOk, btnCancel });
             AcceptButton = btnOk; CancelButton = btnCancel;

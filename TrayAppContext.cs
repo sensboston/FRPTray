@@ -6,6 +6,7 @@ using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Timer = System.Threading.Timer;
@@ -17,7 +18,6 @@ namespace FRPTray
         private readonly SynchronizationContext uiContext;
 
         private NotifyIcon notifyIcon;
-        private HeaderLabel versionLabel;
         private ToolStripMenuItem startItem;
         private ToolStripMenuItem stopItem;
         private ToolStripMenuItem statusItem;
@@ -55,13 +55,12 @@ namespace FRPTray
             stopItem = new ToolStripMenuItem("Stop tunnel", null, OnStopClicked) { Enabled = false };
             var settingsItem = new ToolStripMenuItem("Settings...", null, OnSettingsClicked);
             copyUrlRootItem = new ToolStripMenuItem("Copy public URL");
-            var showStatusItem = new ToolStripMenuItem("Show connection status", null, OnShowStatusClicked);
+            var showStatusItem = new ToolStripMenuItem("Show connection status...", null, OnShowStatusClicked);
             statusItem = new ToolStripMenuItem("Status: not connected") { Enabled = false };
 
             var menu = new ContextMenuStrip();
-            versionLabel = new HeaderLabel(GetVersionText());
-            menu.Items.Add(versionLabel);
-            menu.Items.Add(new ToolStripSeparator());
+            var placeholderItem = new ToolStripMenuItem(" ") { Enabled = false, Padding = new Padding(5) };
+            menu.Items.Add(placeholderItem);
             menu.Items.Add(startItem);
             menu.Items.Add(stopItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -71,6 +70,20 @@ namespace FRPTray
             menu.Items.Add(statusItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Exit", null, OnExitClicked));
+
+            menu.Paint += (sender, e) =>
+            {
+                var headerRect = new Rectangle(0, 0, menu.Width, statusItem.Height + 5);
+                using (var brush = new SolidBrush(Color.DarkSlateBlue))
+                    e.Graphics.FillRectangle(brush, headerRect);
+
+                using (var scaledFont = new Font(SystemFonts.MenuFont.FontFamily, SystemFonts.MenuFont.Size))
+                {
+                    TextRenderer.DrawText(e.Graphics, GetVersionText(),
+                        scaledFont, headerRect, Color.White,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                }
+            };
 
             notifyIcon = new NotifyIcon
             {
@@ -370,6 +383,11 @@ namespace FRPTray
             }
         }
 
+        private string RemoveAnsiEscapes(string text)
+        {
+            return Regex.Replace(text, @"\x1B\[[0-9;]*[mK]", "");
+        }
+
         private void OnShowStatusClicked(object sender, EventArgs e)
         {
             string mapping;
@@ -391,9 +409,10 @@ namespace FRPTray
                     "Status: " + statusText + Environment.NewLine +
                     "Tunnels:" + Environment.NewLine +
                     mapping + Environment.NewLine +
-                    "Network: " + (networkAvailable ? "available" : "unavailable") + Environment.NewLine +
+                    "Network: " + (networkAvailable ? "available" : "unavailable") + 
+                    Environment.NewLine + Environment.NewLine +
                     "---- Last log lines ----" + Environment.NewLine +
-                    logBuffer.ToString();
+                    RemoveAnsiEscapes(logBuffer.ToString());
             }
 
             using (var dlg = new StatusDialog(text))

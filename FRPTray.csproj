@@ -50,9 +50,6 @@
     <Compile Include="DefenderExclusion.cs" />
     <Compile Include="FrpFiles.cs" />
     <Compile Include="FrpProcess.cs" />
-    <Compile Include="HeaderLabel.cs">
-      <SubType>Component</SubType>
-    </Compile>
     <Compile Include="PortableSettingsProvider.cs" />
     <Compile Include="PortableSettingsProviderBase.cs" />
     <Compile Include="Ports.cs" />

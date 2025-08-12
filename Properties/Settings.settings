@@ -2,10 +2,10 @@
 <SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="FRPTray.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
-    <Setting Name="LocalPort" Type="System.Int32" Scope="User">
+    <Setting Name="LocalPort" Type="System.String" Scope="User">
       <Value Profile="(Default)">1433</Value>
     </Setting>
-    <Setting Name="RemotePort" Type="System.Int32" Scope="User">
+    <Setting Name="RemotePort" Type="System.String" Scope="User">
       <Value Profile="(Default)">24000</Value>
     </Setting>
     <Setting Name="Server" Type="System.String" Scope="User">

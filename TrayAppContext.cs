@@ -11,19 +11,20 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using Timer = System.Threading.Timer;
+using System.Collections.Generic;
 
 namespace FRPTray
 {
     public sealed class TrayAppContext : ApplicationContext
     {
-        #region Fields
-
         private readonly SynchronizationContext uiContext;
 
         private NotifyIcon notifyIcon;
+        private HeaderLabel versionLabel;
         private ToolStripMenuItem startItem;
         private ToolStripMenuItem stopItem;
         private ToolStripMenuItem statusItem;
+        private ToolStripMenuItem copyUrlRootItem;
         private Process frpcProcess;
         private string configPath;
         private string frpcPath;
@@ -44,13 +45,8 @@ namespace FRPTray
         private const string FrpcIvB64 = "JLlT8v+R+wUJH3PvF/D1wQ==";
         private const string FrpcResourceName = "FRPTray.frpc.enc";
 
-        // Backoff throttle
         private readonly Random rng = new Random();
         private DateTime nextAllowedStartUtc = DateTime.MinValue;
-
-        #endregion
-
-        #region Constructor & Initialization
 
         public TrayAppContext()
         {
@@ -62,16 +58,21 @@ namespace FRPTray
             startItem = new ToolStripMenuItem("Start tunnel", null, OnStartClicked);
             stopItem = new ToolStripMenuItem("Stop tunnel", null, OnStopClicked) { Enabled = false };
             var settingsItem = new ToolStripMenuItem("Settings...", null, OnSettingsClicked);
-            var copyUrlItem = new ToolStripMenuItem("Copy public URL", null, OnCopyUrlClicked);
+            copyUrlRootItem = new ToolStripMenuItem("Copy public URL");
             var showStatusItem = new ToolStripMenuItem("Show connection status", null, OnShowStatusClicked);
             statusItem = new ToolStripMenuItem("Status: not connected") { Enabled = false };
 
             var menu = new ContextMenuStrip();
+
+            versionLabel = new HeaderLabel(GetVersionText());
+            menu.Items.Add(versionLabel);
+            menu.Items.Add(new ToolStripSeparator());
+
             menu.Items.Add(startItem);
             menu.Items.Add(stopItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(settingsItem);
-            menu.Items.Add(copyUrlItem);
+            menu.Items.Add(copyUrlRootItem);
             menu.Items.Add(showStatusItem);
             menu.Items.Add(statusItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -85,18 +86,26 @@ namespace FRPTray
                 ContextMenuStrip = menu
             };
 
+            notifyIcon.MouseDoubleClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    if (IsProcessRunning(frpcProcess))
+                        OnStopClicked(this, EventArgs.Empty);
+                    else
+                        OnStartClicked(this, EventArgs.Empty);
+                }
+            };
+
             NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
             healthTimer = new System.Threading.Timer(OnHealthTimer, null, Timeout.Infinite, Timeout.Infinite);
 
-            // Apply startup setting and optional auto-start tunnel
             StartupManager.Set(Properties.Settings.Default.RunOnStartup);
+            RebuildCopyMenu();
+
             if (Properties.Settings.Default.StartTunnelOnRun)
                 OnUi(() => OnStartClicked(this, EventArgs.Empty));
         }
-
-        #endregion
-
-        #region Network availability
 
         private void OnNetworkAvailabilityChanged(object sender, NetworkAvailabilityEventArgs e)
         {
@@ -117,10 +126,6 @@ namespace FRPTray
             }
         }
 
-        #endregion
-
-        #region Health monitoring
-
         private void OnHealthTimer(object state)
         {
             if (shuttingDown) return;
@@ -135,7 +140,7 @@ namespace FRPTray
                 return;
             }
 
-            bool portOk = ProbeRemotePort();
+            bool portOk = ProbeRemotePorts();
             if (!portOk)
             {
                 AppendLog("[WARN] health check failed; restarting");
@@ -157,7 +162,6 @@ namespace FRPTray
         {
             if (!networkAvailable) return;
 
-            // Throttle restart attempts
             if (DateTime.UtcNow < nextAllowedStartUtc)
             {
                 int ms = (int)Math.Max(500, (nextAllowedStartUtc - DateTime.UtcNow).TotalMilliseconds);
@@ -165,7 +169,6 @@ namespace FRPTray
                 return;
             }
 
-            // Re-create helper files if missing
             if (string.IsNullOrEmpty(frpcPath) || !File.Exists(frpcPath) ||
                 string.IsNullOrEmpty(configPath) || !File.Exists(configPath))
             {
@@ -197,13 +200,25 @@ namespace FRPTray
             }
             catch (Win32Exception ex)
             {
-                AppendLog("[ERR] start blocked: " + ex.Message);
-                RestartHealthTimerWithBackoff();
+                bool added = TryOfferAndAddDefenderExclusion(frpcPath, ex);
+                if (added)
+                {
+                    Thread.Sleep(1500);
+                    ScheduleReconnectSoon();
+                }
+                else
+                {
+                    ShowError("Process blocked: " + ex.Message);
+                    statusText = "error";
+                    OnUi(() => UpdateStatusUi(false));
+                }
             }
             catch (Exception ex)
             {
-                AppendLog("[ERR] start exception: " + ex.Message);
-                RestartHealthTimerWithBackoff();
+                ShowError("Start failed: " + ex.Message);
+                statusText = "error";
+                OnUi(() => UpdateStatusUi(false));
+                ScheduleReconnectSoon();
             }
         }
 
@@ -217,31 +232,32 @@ namespace FRPTray
             try { healthTimer.Change(delay, Timeout.Infinite); } catch { }
         }
 
-        private bool ProbeRemotePort()
+        private bool ProbeRemotePorts()
         {
-            int rp = Properties.Settings.Default.RemotePort;
-            if (rp <= 0 || rp > 65535) rp = 24000;
+            int[] locals, remotes;
+            try { GetPortsFromSettings(out locals, out remotes); }
+            catch { return false; }
 
-            try
+            for (int i = 0; i < remotes.Length; i++)
             {
-                using (var client = new TcpClient())
+                int rp = remotes[i];
+                try
                 {
-                    var ar = client.BeginConnect(ServerAddressSetting, rp, null, null);
-                    bool ok = ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(800));
-                    if (!ok) return false;
-                    client.EndConnect(ar);
-                    return true;
+                    using (var client = new TcpClient())
+                    {
+                        var ar = client.BeginConnect(ServerAddressSetting, rp, null, null);
+                        bool ok = ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(800));
+                        if (!ok) return false;
+                        client.EndConnect(ar);
+                    }
+                }
+                catch
+                {
+                    return false;
                 }
             }
-            catch
-            {
-                return false;
-            }
+            return true;
         }
-
-        #endregion
-
-        #region Tray menu handlers
 
         private void OnStartClicked(object sender, EventArgs e)
         {
@@ -267,7 +283,7 @@ namespace FRPTray
                 if (!started)
                 {
                     ShowError("Start failed: " + errorMessage);
-                    statusText = "not connected";
+                    statusText = "error";
                     OnUi(() => UpdateStatusUi(false));
                     ScheduleReconnectSoon();
                     return;
@@ -278,6 +294,7 @@ namespace FRPTray
                 statusText = BuildConnectedText();
                 OnUi(() => UpdateStatusUi(true));
 
+                RebuildCopyMenu();
                 try { healthTimer.Change(2000, Timeout.Infinite); } catch { }
             }
             catch (Win32Exception ex)
@@ -291,14 +308,14 @@ namespace FRPTray
                 else
                 {
                     ShowError("Process blocked: " + ex.Message);
-                    statusText = "not connected";
+                    statusText = "error";
                     OnUi(() => UpdateStatusUi(false));
                 }
             }
             catch (Exception ex)
             {
                 ShowError("Start failed: " + ex.Message);
-                statusText = "not connected";
+                statusText = "error";
                 OnUi(() => UpdateStatusUi(false));
                 ScheduleReconnectSoon();
             }
@@ -316,6 +333,7 @@ namespace FRPTray
 
             try { healthTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
             TryDeleteTempFiles();
+            RebuildCopyMenu();
         }
 
         private void OnExitClicked(object sender, EventArgs e)
@@ -367,21 +385,21 @@ namespace FRPTray
                 dlg.MinimizeBox = false;
                 dlg.ShowInTaskbar = false;
 
-                lblLocal.Text = "Local port (1-65535):";
+                lblLocal.Text = "Local ports (CSV, 1-65535):";
                 lblLocal.AutoSize = true;
                 lblLocal.Location = new Point(10, 10);
 
                 txtLocal.Location = new Point(10, 30);
                 txtLocal.Width = 300;
-                txtLocal.Text = Properties.Settings.Default.LocalPort.ToString();
+                txtLocal.Text = Properties.Settings.Default.LocalPort ?? "";
 
-                lblRemote.Text = "Remote port (1-65535):";
+                lblRemote.Text = "Remote ports (CSV, 1-65535):";
                 lblRemote.AutoSize = true;
                 lblRemote.Location = new Point(10, 60);
 
                 txtRemote.Location = new Point(10, 80);
                 txtRemote.Width = 300;
-                txtRemote.Text = Properties.Settings.Default.RemotePort.ToString();
+                txtRemote.Text = Properties.Settings.Default.RemotePort ?? "";
 
                 lblServer.Text = "Server (IP or host):";
                 lblServer.AutoSize = true;
@@ -419,17 +437,21 @@ namespace FRPTray
 
                 if (dlg.ShowDialog() != DialogResult.OK) return;
 
-                int newLocal, newRemote;
-                if (!int.TryParse(txtLocal.Text.Trim(), out newLocal) || newLocal < 1 || newLocal > 65535)
+                int[] locals, remotes;
+                try
                 {
-                    ShowError("Invalid Local port. Use 1-65535.");
+                    locals = ParsePortsCsv((txtLocal.Text ?? "").Trim());
+                    remotes = ParsePortsCsv((txtRemote.Text ?? "").Trim());
+                    if (locals.Length == 0) { ShowError("Invalid Local ports."); return; }
+                    if (remotes.Length == 0) { ShowError("Invalid Remote ports."); return; }
+                    if (locals.Length != remotes.Length) { ShowError("Local/Remote ports count mismatch."); return; }
+                }
+                catch (Exception ex)
+                {
+                    ShowError(ex.Message);
                     return;
                 }
-                if (!int.TryParse(txtRemote.Text.Trim(), out newRemote) || newRemote < 1 || newRemote > 65535)
-                {
-                    ShowError("Invalid Remote port. Use 1-65535.");
-                    return;
-                }
+
                 var newServer = (txtServer.Text ?? "").Trim();
                 if (string.IsNullOrEmpty(newServer))
                 {
@@ -439,8 +461,8 @@ namespace FRPTray
 
                 bool wasRunning = IsProcessRunning(frpcProcess);
 
-                Properties.Settings.Default.LocalPort = newLocal;
-                Properties.Settings.Default.RemotePort = newRemote;
+                Properties.Settings.Default.LocalPort = (txtLocal.Text ?? "").Trim();
+                Properties.Settings.Default.RemotePort = (txtRemote.Text ?? "").Trim();
                 Properties.Settings.Default.Server = newServer;
                 Properties.Settings.Default.RunOnStartup = chkRunStartup.Checked;
                 Properties.Settings.Default.StartTunnelOnRun = chkStartOnRun.Checked;
@@ -458,28 +480,35 @@ namespace FRPTray
                     statusText = "not connected";
                     OnUi(() => UpdateStatusUi(false));
                 }
+
+                RebuildCopyMenu();
             }
-        }
-
-        private void OnCopyUrlClicked(object sender, EventArgs e)
-        {
-            int remotePort = Properties.Settings.Default.RemotePort;
-            if (remotePort <= 0 || remotePort > 65535) remotePort = 24000;
-
-            string url = ServerAddressSetting + ":" + remotePort.ToString();
-            try { Clipboard.SetText(url); }
-            catch { ShowError("Cannot access clipboard."); }
         }
 
         private void OnShowStatusClicked(object sender, EventArgs e)
         {
+            string mapping;
+            try
+            {
+                int[] locals, remotes;
+                GetPortsFromSettings(out locals, out remotes);
+                var mb = new StringBuilder();
+                for (int i = 0; i < locals.Length; i++)
+                    mb.AppendLine("  127.0.0.1:" + locals[i] + " → " + ServerAddressSetting + ":" + remotes[i]);
+                mapping = mb.ToString().TrimEnd();
+            }
+            catch
+            {
+                mapping = "(not configured)";
+            }
+
             string text;
             lock (logLock)
             {
                 text =
                     "Status: " + statusText + Environment.NewLine +
-                    "Local: 127.0.0.1:" + Properties.Settings.Default.LocalPort + Environment.NewLine +
-                    "Remote: " + ServerAddressSetting + ":" + Properties.Settings.Default.RemotePort + Environment.NewLine +
+                    "Tunnels:" + Environment.NewLine +
+                    mapping + Environment.NewLine +
                     "Network: " + (networkAvailable ? "available" : "unavailable") + Environment.NewLine +
                     "---- Last log lines ----" + Environment.NewLine +
                     logBuffer.ToString();
@@ -523,9 +552,81 @@ namespace FRPTray
             }
         }
 
-        #endregion
+        private sealed class PortPair
+        {
+            public int Local;
+            public int Remote;
+            public PortPair(int local, int remote) { Local = local; Remote = remote; }
+        }
 
-        #region FRP process management
+        private void RebuildCopyMenu()
+        {
+            if (copyUrlRootItem == null) return;
+            copyUrlRootItem.DropDownItems.Clear();
+            copyUrlRootItem.Click -= OnCopySingleRootClicked;
+            copyUrlRootItem.Tag = null;
+
+            int[] locals, remotes;
+            try
+            {
+                GetPortsFromSettings(out locals, out remotes);
+            }
+            catch
+            {
+                copyUrlRootItem.Text = "Copy public URL";
+                copyUrlRootItem.Enabled = false;
+                return;
+            }
+
+            if (remotes.Length == 1)
+            {
+                int rp = remotes[0];
+                int lp = locals[0];
+                copyUrlRootItem.Text = "Copy public URL for port " + rp;
+                copyUrlRootItem.Enabled = true;
+                copyUrlRootItem.Tag = new PortPair(lp, rp);
+                copyUrlRootItem.Click += OnCopySingleRootClicked;
+            }
+            else
+            {
+                copyUrlRootItem.Text = "Copy public URLs";
+                copyUrlRootItem.Enabled = true;
+
+                for (int i = 0; i < remotes.Length; i++)
+                {
+                    int rp = remotes[i];
+                    int lp = locals[i];
+                    var item = new ToolStripMenuItem(FormatUrl(lp, rp));
+                    item.Tag = new PortPair(lp, rp);
+                    item.Click += (s, e) =>
+                    {
+                        var pair = (PortPair)((ToolStripMenuItem)s).Tag;
+                        CopyUrlToClipboard(FormatUrl(pair.Local, pair.Remote));
+                    };
+                    copyUrlRootItem.DropDownItems.Add(item);
+                }
+            }
+        }
+
+        private void OnCopySingleRootClicked(object sender, EventArgs e)
+        {
+            var pair = (PortPair)((ToolStripMenuItem)sender).Tag;
+            CopyUrlToClipboard(FormatUrl(pair.Local, pair.Remote));
+        }
+
+        private string FormatUrl(int localPort, int remotePort)
+        {
+            string scheme = "";
+            if (localPort == 80) scheme = "http://";
+            else if (localPort == 443) scheme = "https://";
+            return scheme + ServerAddressSetting + ":" + remotePort;
+        }
+
+        private void CopyUrlToClipboard(string url)
+        {
+            try { Clipboard.SetText(url); }
+            catch { ShowError("Cannot access clipboard."); }
+        }
 
         private bool TryStartFrpc(out string errorMessage)
         {
@@ -632,10 +733,6 @@ namespace FRPTray
             catch { return false; }
         }
 
-        #endregion
-
-        #region FRPC extraction & temp files
-
         private void PrepareFrpcFiles()
         {
             frpcPath = ExtractFrpc();
@@ -684,35 +781,30 @@ namespace FRPTray
             try { if (!string.IsNullOrEmpty(frpcPath) && File.Exists(frpcPath)) File.Delete(frpcPath); } catch { }
         }
 
-        #endregion
-
-        #region Config generation
-
         private string GetFrpcConfig()
         {
-            int localPort = Properties.Settings.Default.LocalPort;
-            if (localPort <= 0 || localPort > 65535) localPort = 1433;
+            int[] locals, remotes;
+            GetPortsFromSettings(out locals, out remotes);
 
-            int remotePort = Properties.Settings.Default.RemotePort;
-            if (remotePort <= 0 || remotePort > 65535) remotePort = 24000;
+            var sb = new StringBuilder();
+            sb.AppendLine("[common]");
+            sb.AppendLine("server_addr = " + ServerAddressSetting);
+            sb.AppendLine("server_port = 7000");
+            sb.AppendLine("token = CHANGE_ME_STRONG_TOKEN");
+            sb.AppendLine();
 
-            return
-@"[common]
-server_addr = " + ServerAddressSetting + @"
-server_port = 7000
-token = CHANGE_ME_STRONG_TOKEN
-
-[frptray]
-type = tcp
-local_ip = 127.0.0.1
-local_port = " + localPort + @"
-remote_port = " + remotePort + @"
-";
+            for (int i = 0; i < locals.Length; i++)
+            {
+                string name = "frptray-" + (i + 1);
+                sb.AppendLine("[" + name + "]");
+                sb.AppendLine("type = tcp");
+                sb.AppendLine("local_ip = 127.0.0.1");
+                sb.AppendLine("local_port = " + locals[i]);
+                sb.AppendLine("remote_port = " + remotes[i]);
+                sb.AppendLine();
+            }
+            return sb.ToString();
         }
-
-        #endregion
-
-        #region UI/status helpers
 
         private void ShowError(string message)
         {
@@ -757,7 +849,6 @@ remote_port = " + remotePort + @"
                 notifyIcon.Icon = connected ? greenIcon : grayIcon;
                 notifyIcon.Text = "FRPTray: " + statusText;
 
-                // Keep menu in sync
                 if (startItem != null) startItem.Enabled = !connected;
                 if (stopItem != null) stopItem.Enabled = connected;
 
@@ -768,11 +859,35 @@ remote_port = " + remotePort + @"
 
         private string BuildConnectedText()
         {
-            int lp = Properties.Settings.Default.LocalPort;
-            if (lp <= 0 || lp > 65535) lp = 1433;
-            int rp = Properties.Settings.Default.RemotePort;
-            if (rp <= 0 || rp > 65535) rp = 24000;
-            return "connected (local " + lp + " → " + ServerAddressSetting + ":" + rp + ")";
+            try
+            {
+                int[] l, r;
+                GetPortsFromSettings(out l, out r);
+                return "connected to " + ServerAddressSetting;
+            }
+            catch
+            {
+                return "not connected";
+            }
+        }
+
+        private string GetVersionText()
+        {
+            try
+            {
+                var asm = typeof(TrayAppContext).Assembly;
+                var verInfo = FileVersionInfo.GetVersionInfo(asm.Location);
+                string ver = !string.IsNullOrEmpty(verInfo.ProductVersion)
+                    ? verInfo.ProductVersion
+                    : (!string.IsNullOrEmpty(verInfo.FileVersion) ? verInfo.FileVersion : asm.GetName().Version.ToString());
+
+                DateTime buildTime = File.GetLastWriteTime(asm.Location);
+                return $"  FRPTray {ver} - {buildTime.ToString("yyyy-MM-dd HH:mm")}  ";
+            }
+            catch
+            {
+                return "  FRPTray  ";
+            }
         }
 
         private void OnUi(Action action)
@@ -818,9 +933,36 @@ remote_port = " + remotePort + @"
             }
         }
 
-        #endregion
+        private static int[] ParsePortsCsv(string csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv)) return new int[0];
+            var parts = csv.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            var list = new List<int>(parts.Length);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string p = parts[i].Trim();
+                int v;
+                if (!int.TryParse(p, out v) || v < 1 || v > 65535)
+                    throw new ArgumentException("Invalid port in list: " + p);
+                list.Add(v);
+            }
+            return list.ToArray();
+        }
 
-        #region Defender exclusion (UAC)
+        private void GetPortsFromSettings(out int[] locals, out int[] remotes)
+        {
+            string lc = Properties.Settings.Default.LocalPort ?? "";
+            string rc = Properties.Settings.Default.RemotePort ?? "";
+
+            locals = ParsePortsCsv(lc);
+            remotes = ParsePortsCsv(rc);
+
+            if (locals.Length == 0 || remotes.Length == 0)
+                throw new InvalidOperationException("Ports are not configured.");
+
+            if (locals.Length != remotes.Length)
+                throw new InvalidOperationException("Local/Remote ports count mismatch.");
+        }
 
         private bool TryOfferAndAddDefenderExclusion(string processPath, Win32Exception reason)
         {
@@ -897,11 +1039,8 @@ $@"try {{
                 try { if (File.Exists(psScriptPath)) File.Delete(psScriptPath); } catch { }
             }
         }
-
-        #endregion
     }
 
-    // HKCU Run helper
     static class StartupManager
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -926,6 +1065,34 @@ $@"try {{
                 }
             }
             catch { }
+        }
+    }
+
+    internal class HeaderLabel : ToolStripLabel
+    {
+        public HeaderLabel(string text) : base(text)
+        {
+            AutoSize = true;
+            TextAlign = ContentAlignment.MiddleCenter;
+            Padding = new Padding(6);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var backColor = Color.DarkSlateBlue;
+            var foreColor = Color.White;
+
+            using (var b = new SolidBrush(backColor))
+                e.Graphics.FillRectangle(b, e.ClipRectangle);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                Text,
+                new Font(SystemFonts.MenuFont, FontStyle.Regular),
+                e.ClipRectangle,
+                foreColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+            );
         }
     }
 }

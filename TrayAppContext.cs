@@ -548,7 +548,7 @@ namespace FRPTray
                     ? verInfo.ProductVersion
                     : (!string.IsNullOrEmpty(verInfo.FileVersion) ? verInfo.FileVersion : asm.GetName().Version.ToString());
                 var buildTime = System.IO.File.GetLastWriteTime(asm.Location);
-                return "  FRPTray " + ver + " - " + buildTime.ToString("yyyy-MM-dd HH:mm") + "  ";
+                return "  FRPTray " + ver + "  ";
             }
             catch { return "  FRPTray  "; }
         }

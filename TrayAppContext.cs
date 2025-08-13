@@ -179,7 +179,7 @@ namespace FRPTray
                 {
                     int[] locals, remotes;
                     Ports.GetFromSettings(out locals, out remotes);
-                    FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, locals, remotes);
+                    FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
                 }
                 catch (Exception prepEx)
                 {
@@ -278,7 +278,7 @@ namespace FRPTray
             {
                 int[] locals, remotes;
                 Ports.GetFromSettings(out locals, out remotes);
-                FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, locals, remotes);
+                FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
 
                 statusText = "connecting...";
                 OnUi(() => UpdateStatusUi(false));
@@ -587,6 +587,24 @@ namespace FRPTray
             {
                 var s = Properties.Settings.Default.Server;
                 return string.IsNullOrWhiteSpace(s) ? "127.0.0.1" : s.Trim();
+            }
+        }
+
+        private string ServerPortSetting
+        {
+            get
+            {
+                var s = Properties.Settings.Default.ServerPort;
+                return string.IsNullOrWhiteSpace(s) ? "7000" : s.Trim();
+            }
+        }
+
+        private string TokenSetting
+        {
+            get
+            {
+                var s = Properties.Settings.Default.Token;
+                return string.IsNullOrWhiteSpace(s) ? "CHANGE_ME_STRONG_TOKEN" : s.Trim();
             }
         }
 

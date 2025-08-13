@@ -21,7 +21,7 @@ namespace FRPTray
             Text = "Settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(Scale(340), Scale(240));
+            ClientSize = new Size(Scale(340), Scale(320));
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
 
             var lblLocal = new Label { Text = "Local ports (CSV, 1-65535):", AutoSize = true, Location = new Point(Scale(10), Scale(10)) };
@@ -31,16 +31,33 @@ namespace FRPTray
             var txtRemote = new TextBox { Location = new Point(Scale(10), Scale(80)), Width = Scale(300), Text = Properties.Settings.Default.RemotePort ?? "" };
 
             var lblServer = new Label { Text = "Server (IP or host):", AutoSize = true, Location = new Point(Scale(10), Scale(110)) };
-            var txtServer = new TextBox { Location = new Point(Scale(10), Scale(130)), Width = Scale(300), Text = Properties.Settings.Default.Server };
+            var txtServer = new TextBox { Location = new Point(Scale(10), Scale(130)), Width = Scale(300), Text = Properties.Settings.Default.Server ?? "" };
 
-            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(160)), Checked = Properties.Settings.Default.RunOnStartup };
-            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(Scale(10), Scale(183)), Checked = Properties.Settings.Default.StartTunnelOnRun };
+            var lblServerPort = new Label { Text = "Server port:", AutoSize = true, Location = new Point(Scale(10), Scale(160)) };
+            var txtServerPort = new TextBox { Location = new Point(Scale(10), Scale(180)), Width = Scale(300), Text = Properties.Settings.Default.ServerPort ?? "" };
 
-            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(Scale(170), Scale(205)), Size = new Size(Scale(75), Scale(23)) };
-            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Scale(250), Scale(205)), Size = new Size(Scale(75), Scale(23)) };
+            var lblToken = new Label { Text = "Token:", AutoSize = true, Location = new Point(Scale(10), Scale(210)) };
+            var txtToken = new TextBox { Location = new Point(Scale(10), Scale(230)), Width = Scale(300), Text = Properties.Settings.Default.Token ?? "" };
 
-            Controls.AddRange(new Control[] { lblLocal, txtLocal, lblRemote, txtRemote, lblServer, txtServer, chkRunStartup, chkStartOnRun, btnOk, btnCancel });
-            AcceptButton = btnOk; CancelButton = btnCancel;
+            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(260)), Checked = Properties.Settings.Default.RunOnStartup };
+            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(Scale(10), Scale(283)), Checked = Properties.Settings.Default.StartTunnelOnRun };
+
+            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(Scale(170), Scale(290)), Size = new Size(Scale(75), Scale(23)) };
+            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Scale(250), Scale(290)), Size = new Size(Scale(75), Scale(23)) };
+
+            Controls.AddRange(new Control[]
+            {
+                lblLocal, txtLocal,
+                lblRemote, txtRemote,
+                lblServer, txtServer,
+                lblServerPort, txtServerPort,
+                lblToken, txtToken,
+                chkRunStartup, chkStartOnRun,
+                btnOk, btnCancel
+            });
+
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
 
             btnOk.Click += (s, e) =>
             {
@@ -66,9 +83,25 @@ namespace FRPTray
                     DialogResult = DialogResult.None; return;
                 }
 
+                var newServerPort = (txtServerPort.Text ?? "").Trim();
+                if (string.IsNullOrEmpty(newServerPort))
+                {
+                    MessageBox.Show("Server port cannot be empty.");
+                    DialogResult = DialogResult.None; return;
+                }
+
+                var newToken = (txtToken.Text ?? "").Trim();
+                if (string.IsNullOrEmpty(newToken))
+                {
+                    MessageBox.Show("Token cannot be empty.");
+                    DialogResult = DialogResult.None; return;
+                }
+
                 Properties.Settings.Default.LocalPort = (txtLocal.Text ?? "").Trim();
                 Properties.Settings.Default.RemotePort = (txtRemote.Text ?? "").Trim();
                 Properties.Settings.Default.Server = newServer;
+                Properties.Settings.Default.ServerPort = newServerPort;
+                Properties.Settings.Default.Token = newToken;
                 Properties.Settings.Default.RunOnStartup = chkRunStartup.Checked;
                 Properties.Settings.Default.StartTunnelOnRun = chkStartOnRun.Checked;
                 Properties.Settings.Default.Save();

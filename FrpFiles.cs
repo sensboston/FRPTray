@@ -11,11 +11,11 @@ namespace FRPTray
         private const string FrpcIvB64 = "JLlT8v+R+wUJH3PvF/D1wQ==";
         private const string FrpcResourceName = "FRPTray.frpc.enc";
 
-        public static void Prepare(out string frpcPath, out string configPath, string server, int[] locals, int[] remotes)
+        public static void Prepare(out string frpcPath, out string configPath, string server, string serverPort, string token, int[] locals, int[] remotes)
         {
             frpcPath = ExtractFrpc();
             configPath = Path.Combine(Path.GetTempPath(), "frpc_" + Guid.NewGuid().ToString("N") + ".ini");
-            File.WriteAllText(configPath, BuildConfig(server, locals, remotes));
+            File.WriteAllText(configPath, BuildConfig(server, serverPort, token, locals, remotes));
         }
 
         public static void TryDeleteTemp(string frpcPath, string configPath)
@@ -48,13 +48,13 @@ namespace FRPTray
             return tempPath;
         }
 
-        private static string BuildConfig(string server, int[] locals, int[] remotes)
+        private static string BuildConfig(string server, string serverPort, string token, int[] locals, int[] remotes)
         {
             var sb = new StringBuilder();
             sb.AppendLine("[common]");
             sb.AppendLine("server_addr = " + server);
-            sb.AppendLine("server_port = 7000");
-            sb.AppendLine("token = CHANGE_ME_STRONG_TOKEN");
+            sb.AppendLine("server_port = " + serverPort);
+            sb.AppendLine("token = " + token);
             sb.AppendLine();
 
             for (int i = 0; i < locals.Length; i++)

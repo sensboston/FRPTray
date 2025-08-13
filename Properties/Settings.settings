@@ -17,5 +17,11 @@
     <Setting Name="StartTunnelOnRun" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
+    <Setting Name="Token" Type="System.String" Scope="User">
+      <Value Profile="(Default)">CHANGE_ME_STRONG_TOKEN</Value>
+    </Setting>
+    <Setting Name="ServerPort" Type="System.String" Scope="User">
+      <Value Profile="(Default)">7000</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

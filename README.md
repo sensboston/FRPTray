@@ -80,9 +80,14 @@ It provides a simple UI to start, stop, and monitor a local-to-remote ports forw
    - download latest (or preferred) release from https://github.com/fatedier/frp/releases 
    - unpack frpc.exe to the FRPTray folder
    - run PowerShell script **encode.ps1**
-   - you should have updated frpc.enc and frpc_keys.txt files
+   - you should have an updated **frpc.enc** and **frpc_keys.txt** files after
    - delete original frpc.exe
    - enable Windows Defender
+   - use srings from **frpc_keys.txt** to modify these lines in the **FrpFiles.cs**
+     ```
+        private const string FrpcKeyB64 = "qUEpGDPK/+ftBlq4ThCDQvuPOdHsQnsnp2KtEJsuN+k=";
+        private const string FrpcIvB64 = "JLlT8v+R+wUJH3PvF/D1wQ=="; 
+     ```
 3. Build solution in Visual Studio.
 4. Enjoy!
 

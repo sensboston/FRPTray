@@ -1,7 +1,7 @@
 # FRPTray
 
 **FRPTray** is a lightweight Windows system tray application for managing an [FRP](https://github.com/fatedier/frp) (`frpc`) tunnel.  
-It provides a simple UI to start, stop, and monitor a local-to-remote port forwarding tunnel, with automatic reconnection and optional startup settings.
+It provides a simple UI to start, stop, and monitor a local-to-remote ports forwarding tunnel, with automatic reconnection and optional startup settings.
 
 ---
 
@@ -10,14 +10,14 @@ It provides a simple UI to start, stop, and monitor a local-to-remote port forwa
 - **Tray icon control**
   - Start/Stop tunnel from the context menu
   - Live connection status (gray = disconnected, green = connected)
-  - Quick copy of the public tunnel URL
+  - Quick copy of the public tunnel URLs
   - Status window with latest logs
 - **Automatic tunnel management**
   - Periodic health checks (process and remote port)
   - Auto-reconnect with backoff and jitter
   - Network change handling (pause/reconnect on disconnect/reconnect)
 - **Customizable settings**
-  - Local port, remote port, and server address
+  - Local ports, remote ports, server address, server control port, and secure token (don't forget to change!)
   - Run on Windows startup
   - Start tunnel automatically on application launch
 - **FRPC embedded**
@@ -48,6 +48,8 @@ It provides a simple UI to start, stop, and monitor a local-to-remote port forwa
    - Local port (1–65535)
    - Remote port (1–65535)
    - Server address (IP or hostname)
+   - Server control port (default 7000)
+   - Server secret token
    - Run on Windows startup (optional)
    - Start tunnel on run (optional)
 4. Click **Start tunnel** to establish the connection.

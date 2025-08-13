@@ -76,7 +76,7 @@ It provides a simple UI to start, stop, and monitor a local-to-remote ports forw
    ```bash
    git clone https://github.com/sensboston/FRPTray
 2. If you want to update frpc.exe (FPR client app for Windows), do the following:
-   - temprary disable Windows Defender antivirus, to avoid false positive for the latest FPRC releases
+   - temprary disable Windows Defender antivirus, to avoid false positive for the latest FRPC releases
    - download latest (or preferred) release from https://github.com/fatedier/frp/releases 
    - unpack frpc.exe to the FRPTray folder
    - run PowerShell script **encode.ps1**

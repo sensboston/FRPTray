@@ -1,4 +1,15 @@
-﻿using System;
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+using System;
 using System.Collections.Generic;
 
 namespace FRPTray
@@ -13,8 +24,7 @@ namespace FRPTray
             for (int i = 0; i < parts.Length; i++)
             {
                 var s = parts[i].Trim();
-                int v;
-                if (!int.TryParse(s, out v) || v < 1 || v > 65535)
+                if (!int.TryParse(s, out int v) || v < 1 || v > 65535)
                     throw new ArgumentException("Invalid port in list: " + s);
                 list.Add(v);
             }
@@ -23,8 +33,8 @@ namespace FRPTray
 
         public static void GetFromSettings(out int[] locals, out int[] remotes)
         {
-            string lc = Properties.Settings.Default.LocalPort ?? "";
-            string rc = Properties.Settings.Default.RemotePort ?? "";
+            var lc = Properties.Settings.Default.LocalPort ?? "";
+            var rc = Properties.Settings.Default.RemotePort ?? "";
 
             locals = ParseCsv(lc);
             remotes = ParseCsv(rc);

@@ -1,4 +1,15 @@
-﻿using System;
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -7,14 +18,8 @@ namespace FRPTray
 {
     internal static class FrpProcess
     {
-        public static bool TryStart(
-            string frpcPath,
-            string configPath,
-            Action<string> onOut,
-            Action<string> onErr,
-            Action onExit,
-            out Process process,
-            out string errorMessage)
+        public static bool TryStart(string frpcPath, string configPath, Action<string> onOut, Action<string> onErr,
+                                    Action onExit, out Process process, out string errorMessage)
         {
             errorMessage = null;
             process = null;
@@ -67,7 +72,7 @@ namespace FRPTray
                 }
             }
             catch { }
-            finally { try { if (proc != null) proc.Dispose(); } catch { } }
+            finally { try { proc?.Dispose(); } catch { } }
         }
 
         public static bool IsProcessRunning(Process p)
@@ -82,38 +87,25 @@ namespace FRPTray
             try
             {
                 string tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd('\\');
-                var list = Process.GetProcesses();
+                var list = Process.GetProcessesByName("frpc");
 
                 foreach (var p in list)
                 {
-                    bool kill = false;
                     try
                     {
-                        string name = null;
-                        try { name = p.ProcessName; } catch { }
+                        var mm = p.MainModule;
+                        if (mm == null) continue;
 
-                        if (!IsFrpcGuidName(name))
-                            continue;
+                        string exePath = mm.FileName ?? string.Empty;
+                        string dirFull;
+                        try { dirFull = Path.GetFullPath(Path.GetDirectoryName(exePath) ?? "").TrimEnd('\\'); }
+                        catch { continue; }
 
-                        // Try to verify the executable path lives under %TEMP%
-                        try
-                        {
-                            var mm = p.MainModule; // may throw for protected/system processes
-                            if (mm != null && IsUnderTempFrpcExe(mm.FileName, tempRoot))
-                                kill = true;
-                            else
-                                kill = true; // fallback by name only
-                        }
-                        catch
-                        {
-                            kill = true; // fallback by name only
-                        }
+                        if (!exePath.EndsWith("frpc.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!dirFull.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase)) continue;
 
-                        if (kill)
-                        {
-                            try { p.Kill(); } catch { }
-                            try { p.WaitForExit(1500); } catch { }
-                        }
+                        try { p.Kill(); } catch { }
+                        try { p.WaitForExit(1500); } catch { }
                     }
                     catch { }
                     finally
@@ -123,56 +115,6 @@ namespace FRPTray
                 }
             }
             catch { }
-        }
-
-        private static bool IsFrpcGuidName(string procName)
-        {
-            if (string.IsNullOrEmpty(procName)) return false;
-            if (!procName.StartsWith("frpc_", StringComparison.OrdinalIgnoreCase)) return false;
-
-            string core = procName.Substring("frpc_".Length);
-            if (core.Length != 32) return false;
-
-            for (int i = 0; i < core.Length; i++)
-            {
-                char c = core[i];
-                bool hex = (c >= '0' && c <= '9') ||
-                           (c >= 'a' && c <= 'f') ||
-                           (c >= 'A' && c <= 'F');
-                if (!hex) return false;
-            }
-            return true;
-        }
-
-        private static bool IsUnderTempFrpcExe(string exePath, string tempRoot)
-        {
-            if (string.IsNullOrEmpty(exePath)) return false;
-
-            string dir, file, dirFull;
-            try
-            {
-                dir = Path.GetDirectoryName(exePath) ?? "";
-                file = Path.GetFileName(exePath) ?? "";
-                dirFull = Path.GetFullPath(dir).TrimEnd('\\');
-            }
-            catch { return false; }
-
-            if (!dirFull.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase)) return false;
-            if (!file.StartsWith("frpc_", StringComparison.OrdinalIgnoreCase)) return false;
-            if (!file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return false;
-
-            int coreLen = file.Length - "frpc_".Length - ".exe".Length;
-            if (coreLen != 32) return false;
-
-            for (int i = 0; i < 32; i++)
-            {
-                char c = file["frpc_".Length + i];
-                bool hex = (c >= '0' && c <= '9') ||
-                           (c >= 'a' && c <= 'f') ||
-                           (c >= 'A' && c <= 'F');
-                if (!hex) return false;
-            }
-            return true;
         }
     }
 }

@@ -1,4 +1,15 @@
-﻿using System;
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -6,8 +17,8 @@ namespace FRPTray
 {
     internal sealed class StatusDialog : Form
     {
-        private TextBox logTextBox;
-        private Timer updateTimer;
+        private readonly TextBox logTextBox;
+        private readonly Timer updateTimer;
         private readonly TrayAppContext parentContext;
 
         public StatusDialog(string initialText, TrayAppContext context = null)
@@ -15,7 +26,7 @@ namespace FRPTray
             parentContext = context;
             AutoScaleMode = AutoScaleMode.Dpi;
 
-            float dpiScale = GetDpiScale();
+            var dpiScale = GetDpiScale();
             int Scale(int value) => dpiScale == 1.0f ? value : (int)(value * dpiScale);
 
             Text = "Connection status";
@@ -82,7 +93,8 @@ namespace FRPTray
                 updateTimer.Start();
             }
 
-            FormClosed += (s, e) => {
+            FormClosed += (s, e) => 
+            {
                 updateTimer?.Stop();
                 updateTimer?.Dispose();
             };
@@ -99,8 +111,7 @@ namespace FRPTray
                     logTextBox.Text = newText;
 
                     // Auto-scroll to bottom if user was already at bottom
-                    if (wasAtBottom)
-                        ScrollToBottom();
+                    if (wasAtBottom) ScrollToBottom();
                 }
             }
         }

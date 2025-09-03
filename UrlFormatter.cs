@@ -1,4 +1,15 @@
-﻿namespace FRPTray
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+namespace FRPTray
 {
     internal static class UrlFormatter
     {

@@ -1,15 +1,24 @@
-﻿using System;
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+using System;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace FRPTray
 {
     internal static class FrpFiles
     {
-        private const string FrpcKeyB64 = "qUEpGDPK/+ftBlq4ThCDQvuPOdHsQnsnp2KtEJsuN+k=";
-        private const string FrpcIvB64 = "JLlT8v+R+wUJH3PvF/D1wQ==";
-        private const string FrpcResourceName = "FRPTray.frpc.enc";
+        private const string FrpcResourceNamePrimary = "FRPTray.frpc";
+        private const string FrpcResourceNameAlt = "FRPTray.frpc.exe";
 
         public static void Prepare(out string frpcPath, out string configPath, string server, string serverPort, string token, int[] locals, int[] remotes)
         {
@@ -26,24 +35,15 @@ namespace FRPTray
 
         private static string ExtractFrpc()
         {
-            string tempPath = Path.Combine(Path.GetTempPath(), "frpc_" + Guid.NewGuid().ToString("N") + ".exe");
+            var tempPath = Path.Combine(Path.GetTempPath(), "frpc.exe");
 
             var asm = typeof(FrpFiles).Assembly;
-            using (var resourceStream = asm.GetManifestResourceStream(FrpcResourceName))
+            using (var resourceStream = asm.GetManifestResourceStream(FrpcResourceNamePrimary) ??
+                                       asm.GetManifestResourceStream(FrpcResourceNameAlt))
             {
-                if (resourceStream == null) throw new InvalidOperationException("Embedded resource not found: " + FrpcResourceName);
-
-                byte[] key = Convert.FromBase64String(FrpcKeyB64);
-                byte[] iv = Convert.FromBase64String(FrpcIvB64);
-
-                using (var aes = Aes.Create())
-                {
-                    aes.Key = key; aes.IV = iv; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7;
-                    using (var decryptor = aes.CreateDecryptor())
-                    using (var crypto = new CryptoStream(resourceStream, decryptor, CryptoStreamMode.Read))
-                    using (var outFile = File.Create(tempPath))
-                        crypto.CopyTo(outFile);
-                }
+                if (resourceStream == null) throw new InvalidOperationException("Embedded resource not found: " + FrpcResourceNamePrimary);
+                using (var outFile = File.Create(tempPath))
+                    resourceStream.CopyTo(outFile);
             }
             return tempPath;
         }

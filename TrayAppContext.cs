@@ -1,4 +1,15 @@
-﻿using System;
+﻿/*
+ * This file is part of FRPTray project: a lightweight 
+ * Windows tray app for managing FRP (frpc) tunnels
+ * 
+ * https://github.com/sensboston/FRPTray
+ *
+ * Copyright (c) 2013-2025 SeNSSoFT
+ * SPDX-License-Identifier: MIT
+ *
+ */
+
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,14 +28,14 @@ namespace FRPTray
     {
         private readonly SynchronizationContext uiContext;
 
-        private NotifyIcon notifyIcon;
-        private ToolStripMenuItem startItem;
-        private ToolStripMenuItem stopItem;
-        private ToolStripMenuItem statusItem;
-        private ToolStripMenuItem copyUrlRootItem;
+        private readonly NotifyIcon notifyIcon;
+        private readonly ToolStripMenuItem startItem;
+        private readonly ToolStripMenuItem stopItem;
+        private readonly ToolStripMenuItem statusItem;
+        private readonly ToolStripMenuItem copyUrlRootItem;
 
-        private Icon grayIcon;
-        private Icon greenIcon;
+        private readonly Icon grayIcon;
+        private readonly Icon greenIcon;
 
         private Process frpcProcess;
         private string frpcPath;
@@ -34,7 +45,7 @@ namespace FRPTray
         private readonly StringBuilder logBuffer = new StringBuilder(8192);
         private readonly object logLock = new object();
 
-        private Timer healthTimer;
+        private readonly Timer healthTimer;
         private volatile bool userWantsRunning;
         private volatile bool shuttingDown;
         private volatile bool networkAvailable = true;
@@ -48,8 +59,8 @@ namespace FRPTray
             FrpProcess.KillStaleFrpcProcesses();
             uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
-            grayIcon = TrayIcons.CreateStatusIcon(Color.Gray);
-            greenIcon = TrayIcons.CreateStatusIcon(Color.Lime);
+            grayIcon = TrayIcons.CreateStatusIcon(System.Drawing.Color.Gray);
+            greenIcon = TrayIcons.CreateStatusIcon(System.Drawing.Color.Lime);
 
             startItem = new ToolStripMenuItem("Start tunnel", null, OnStartClicked);
             stopItem = new ToolStripMenuItem("Stop tunnel", null, OnStopClicked) { Enabled = false };
@@ -74,13 +85,13 @@ namespace FRPTray
             menu.Paint += (sender, e) =>
             {
                 var headerRect = new Rectangle(0, 0, menu.Width, statusItem.Height + 5);
-                using (var brush = new SolidBrush(Color.DarkSlateBlue))
+                using (var brush = new SolidBrush(System.Drawing.Color.DarkSlateBlue))
                     e.Graphics.FillRectangle(brush, headerRect);
 
                 using (var scaledFont = new Font(SystemFonts.MenuFont.FontFamily, SystemFonts.MenuFont.Size))
                 {
                     TextRenderer.DrawText(e.Graphics, GetVersionText(),
-                        scaledFont, headerRect, Color.White,
+                        scaledFont, headerRect, System.Drawing.Color.White,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 }
             };
@@ -177,8 +188,7 @@ namespace FRPTray
             {
                 try
                 {
-                    int[] locals, remotes;
-                    Ports.GetFromSettings(out locals, out remotes);
+                    Ports.GetFromSettings(out int[] locals, out int[] remotes);
                     FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
                 }
                 catch (Exception prepEx)
@@ -191,8 +201,7 @@ namespace FRPTray
 
             try
             {
-                string message;
-                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out message);
+                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out string message);
                 if (started)
                 {
                     reconnectBackoffMs = 1000;
@@ -206,20 +215,10 @@ namespace FRPTray
                     RestartHealthTimerWithBackoff();
                 }
             }
-            catch (Win32Exception ex)
+            catch (Win32Exception)
             {
-                bool added = DefenderExclusion.TryOfferAndAdd(frpcPath, ex, ShowError);
-                if (added)
-                {
-                    Thread.Sleep(1500);
-                    ScheduleReconnectSoon();
-                }
-                else
-                {
-                    ShowError("Process blocked: " + ex.Message);
-                    statusText = "error";
-                    OnUi(() => UpdateStatusUi(false));
-                }
+                Thread.Sleep(2000);
+                ScheduleReconnectSoon();
             }
             catch (Exception ex)
             {
@@ -241,8 +240,8 @@ namespace FRPTray
 
         private bool ProbeRemotePorts()
         {
-            int[] locals, remotes;
-            try { Ports.GetFromSettings(out locals, out remotes); } catch { return false; }
+            int[] remotes;
+            try { Ports.GetFromSettings(out int[] locals, out remotes); } catch { return false; }
 
             for (int i = 0; i < remotes.Length; i++)
             {
@@ -276,15 +275,13 @@ namespace FRPTray
 
             try
             {
-                int[] locals, remotes;
-                Ports.GetFromSettings(out locals, out remotes);
+                Ports.GetFromSettings(out int[] locals, out int[] remotes);
                 FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
 
                 statusText = "connecting...";
                 OnUi(() => UpdateStatusUi(false));
 
-                string errorMessage;
-                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out errorMessage);
+                bool started = FrpProcess.TryStart(frpcPath, configPath, OnFrpcOut, OnFrpcErr, OnFrpcExit, out frpcProcess, out string errorMessage);
                 if (!started)
                 {
                     ShowError("Start failed: " + errorMessage);
@@ -302,20 +299,10 @@ namespace FRPTray
                 RebuildCopyMenu();
                 try { healthTimer.Change(2000, Timeout.Infinite); } catch { }
             }
-            catch (Win32Exception ex)
+            catch (Win32Exception)
             {
-                bool added = DefenderExclusion.TryOfferAndAdd(frpcPath, ex, ShowError);
-                if (added)
-                {
-                    Thread.Sleep(1500);
-                    ScheduleReconnectSoon();
-                }
-                else
-                {
-                    ShowError("Process blocked: " + ex.Message);
-                    statusText = "error";
-                    OnUi(() => UpdateStatusUi(false));
-                }
+                Thread.Sleep(2000);
+                ScheduleReconnectSoon();
             }
             catch (Exception ex)
             {
@@ -393,8 +380,7 @@ namespace FRPTray
             string mapping;
             try
             {
-                int[] locals, remotes;
-                Ports.GetFromSettings(out locals, out remotes);
+                Ports.GetFromSettings(out int[] locals, out int[] remotes);
                 var mb = new StringBuilder();
                 for (int i = 0; i < locals.Length; i++)
                     mb.AppendLine("  127.0.0.1:" + locals[i] + " → " + ServerAddressSetting + ":" + remotes[i]);
@@ -417,7 +403,7 @@ namespace FRPTray
         private void OnShowStatusClicked(object sender, EventArgs e)
         {
             string initialText = GetCurrentLogText();
-            var dlg = new StatusDialog(initialText, this); 
+            var dlg = new StatusDialog(initialText, this);
             dlg.Show();
         }
 
@@ -455,8 +441,10 @@ namespace FRPTray
                 {
                     int rp = remotes[i];
                     int lp = locals[i];
-                    var item = new ToolStripMenuItem(UrlFormatter.Format(ServerAddressSetting, lp, rp));
-                    item.Tag = new PortPair(lp, rp);
+                    var item = new ToolStripMenuItem(UrlFormatter.Format(ServerAddressSetting, lp, rp))
+                    {
+                        Tag = new PortPair(lp, rp)
+                    };
                     item.Click += (s, e) =>
                     {
                         var pair = (PortPair)((ToolStripMenuItem)s).Tag;
@@ -534,7 +522,7 @@ namespace FRPTray
 
         private string BuildConnectedText()
         {
-            try { int[] l, r; Ports.GetFromSettings(out l, out r); return "connected to " + ServerAddressSetting; }
+            try { Ports.GetFromSettings(out int[] l, out int[] r); return "connected to " + ServerAddressSetting; }
             catch { return "not connected"; }
         }
 
@@ -547,7 +535,6 @@ namespace FRPTray
                 string ver = !string.IsNullOrEmpty(verInfo.ProductVersion)
                     ? verInfo.ProductVersion
                     : (!string.IsNullOrEmpty(verInfo.FileVersion) ? verInfo.FileVersion : asm.GetName().Version.ToString());
-                var buildTime = System.IO.File.GetLastWriteTime(asm.Location);
                 return "  FRPTray " + ver + "  ";
             }
             catch { return "  FRPTray  "; }

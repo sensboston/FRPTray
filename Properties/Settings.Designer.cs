@@ -49,7 +49,7 @@ namespace FRPTray.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("ftp.server.com")]
+        [global::System.Configuration.DefaultSettingValueAttribute("frpc.server.com")]
         public string Server {
             get {
                 return ((string)(this["Server"]));
@@ -104,6 +104,18 @@ namespace FRPTray.Properties {
             }
             set {
                 this["ServerPort"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ProxyPrefix {
+            get {
+                return ((string)(this["ProxyPrefix"]));
+            }
+            set {
+                this["ProxyPrefix"] = value;
             }
         }
     }

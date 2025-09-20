@@ -189,7 +189,7 @@ namespace FRPTray
                 try
                 {
                     Ports.GetFromSettings(out int[] locals, out int[] remotes);
-                    FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
+                    FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, ProxyPrefixSetting, locals, remotes);
                 }
                 catch (Exception prepEx)
                 {
@@ -276,7 +276,7 @@ namespace FRPTray
             try
             {
                 Ports.GetFromSettings(out int[] locals, out int[] remotes);
-                FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, locals, remotes);
+                FrpFiles.Prepare(out frpcPath, out configPath, ServerAddressSetting, ServerPortSetting, TokenSetting, ProxyPrefixSetting, locals, remotes);
 
                 statusText = "connecting...";
                 OnUi(() => UpdateStatusUi(false));
@@ -466,9 +466,23 @@ namespace FRPTray
             try { Clipboard.SetText(url); } catch { ShowError("Cannot access clipboard."); }
         }
 
+        private bool ShouldFilterLogLine(string line)
+        {
+            if (line == null) return true;
+
+            // Completely filter out all local connection errors - they are expected and normal
+            if (line.Contains("connect to local service") && line.Contains("error:"))
+            {
+                return true; // Skip this log entry completely
+            }
+
+            return false;
+        }
+
         private void OnFrpcOut(string line)
         {
-            if (line == null) return;
+            if (ShouldFilterLogLine(line)) return;
+
             AppendLog("[OUT] " + line);
             if (line.IndexOf("start proxy success", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 line.IndexOf("login to server success", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -480,7 +494,8 @@ namespace FRPTray
 
         private void OnFrpcErr(string line)
         {
-            if (line == null) return;
+            if (ShouldFilterLogLine(line)) return;
+
             AppendLog("[ERR] " + line);
         }
 
@@ -592,6 +607,21 @@ namespace FRPTray
             {
                 var s = Properties.Settings.Default.Token;
                 return string.IsNullOrWhiteSpace(s) ? "CHANGE_ME_STRONG_TOKEN" : s.Trim();
+            }
+        }
+
+        private string ProxyPrefixSetting
+        {
+            get
+            {
+                var s = Properties.Settings.Default.ProxyPrefix;
+                // If not set, use machine name as default
+                if (string.IsNullOrWhiteSpace(s))
+                {
+                    s = Environment.MachineName.ToLower().Replace(" ", "-");
+                }
+                // Sanitize the prefix
+                return Regex.Replace(s, @"[^a-zA-Z0-9\-]", "-").ToLower();
             }
         }
 

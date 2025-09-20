@@ -9,7 +9,7 @@
       <Value Profile="(Default)">24000</Value>
     </Setting>
     <Setting Name="Server" Type="System.String" Scope="User">
-      <Value Profile="(Default)">ftp.server.com</Value>
+      <Value Profile="(Default)">frpc.server.com</Value>
     </Setting>
     <Setting Name="RunOnStartup" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
@@ -22,6 +22,9 @@
     </Setting>
     <Setting Name="ServerPort" Type="System.String" Scope="User">
       <Value Profile="(Default)">7000</Value>
+    </Setting>
+    <Setting Name="ProxyPrefix" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
     </Setting>
   </Settings>
 </SettingsFile>

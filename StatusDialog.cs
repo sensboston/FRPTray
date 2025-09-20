@@ -21,6 +21,10 @@ namespace FRPTray
         private readonly Timer updateTimer;
         private readonly TrayAppContext parentContext;
 
+        // Store current selection position to restore after update
+        private int savedSelectionStart = 0;
+        private int savedSelectionLength = 0;
+
         public StatusDialog(string initialText, TrayAppContext context = null)
         {
             parentContext = context;
@@ -81,8 +85,14 @@ namespace FRPTray
 
             Controls.AddRange(new Control[] { logTextBox, copy, close });
 
-            // Scroll to bottom on initial show
-            Load += (s, e) => ScrollToBottom();
+            // Use Shown event instead of Load for proper scroll
+            // Shown fires after the form is displayed and all controls are rendered
+            Shown += (s, e) => {
+                // Use BeginInvoke to ensure the scroll happens after all layout is complete
+                BeginInvoke(new Action(() => {
+                    ScrollToBottom();
+                }));
+            };
 
             // Start update timer if context provided
             if (parentContext != null)
@@ -93,7 +103,7 @@ namespace FRPTray
                 updateTimer.Start();
             }
 
-            FormClosed += (s, e) => 
+            FormClosed += (s, e) =>
             {
                 updateTimer?.Stop();
                 updateTimer?.Dispose();
@@ -107,19 +117,22 @@ namespace FRPTray
                 string newText = parentContext.GetCurrentLogText();
                 if (logTextBox.Text != newText)
                 {
-                    bool wasAtBottom = IsScrolledToBottom();
+                    // Save current position
+                    savedSelectionStart = logTextBox.SelectionStart;
+                    savedSelectionLength = logTextBox.SelectionLength;
+
+                    // Update text
                     logTextBox.Text = newText;
 
-                    // Auto-scroll to bottom if user was already at bottom
-                    if (wasAtBottom) ScrollToBottom();
+                    // Restore position - maintain user's view
+                    if (savedSelectionStart <= logTextBox.Text.Length)
+                    {
+                        logTextBox.SelectionStart = savedSelectionStart;
+                        logTextBox.SelectionLength = savedSelectionLength;
+                        logTextBox.ScrollToCaret();
+                    }
                 }
             }
-        }
-
-        private bool IsScrolledToBottom()
-        {
-            var textBox = logTextBox;
-            return textBox.SelectionStart >= textBox.Text.Length - 50; // Within 50 chars of end
         }
 
         private void ScrollToBottom()

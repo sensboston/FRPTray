@@ -20,11 +20,12 @@ namespace FRPTray
         private const string FrpcResourceNamePrimary = "FRPTray.frpc";
         private const string FrpcResourceNameAlt = "FRPTray.frpc.exe";
 
-        public static void Prepare(out string frpcPath, out string configPath, string server, string serverPort, string token, int[] locals, int[] remotes)
+        public static void Prepare(out string frpcPath, out string configPath, string server, string serverPort, string token, string proxyPrefix, int[] locals, int[] remotes)
         {
             frpcPath = ExtractFrpc();
-            configPath = Path.Combine(Path.GetTempPath(), "frpc_" + Guid.NewGuid().ToString("N") + ".ini");
-            File.WriteAllText(configPath, BuildConfig(server, serverPort, token, locals, remotes));
+            // Changed extension from .ini to .toml for modern config format
+            configPath = Path.Combine(Path.GetTempPath(), "frpc_" + Guid.NewGuid().ToString("N") + ".toml");
+            File.WriteAllText(configPath, BuildConfig(server, serverPort, token, proxyPrefix, locals, remotes));
         }
 
         public static void TryDeleteTemp(string frpcPath, string configPath)
@@ -48,24 +49,49 @@ namespace FRPTray
             return tempPath;
         }
 
-        private static string BuildConfig(string server, string serverPort, string token, int[] locals, int[] remotes)
+        private static string BuildConfig(string server, string serverPort, string token, string proxyPrefix, int[] locals, int[] remotes)
         {
+            // Ensure proxy prefix is valid
+            if (string.IsNullOrWhiteSpace(proxyPrefix))
+            {
+                // Fallback to machine name if prefix is empty
+                proxyPrefix = Environment.MachineName.ToLower().Replace(" ", "-");
+            }
+
+            // Sanitize the prefix to ensure it's valid for frpc
+            proxyPrefix = System.Text.RegularExpressions.Regex.Replace(proxyPrefix, @"[^a-zA-Z0-9\-]", "-").ToLower();
+
             var sb = new StringBuilder();
-            sb.AppendLine("[common]");
-            sb.AppendLine("server_addr = " + server);
-            sb.AppendLine("server_port = " + serverPort);
-            sb.AppendLine("token = " + token);
+
+            // Generate TOML format configuration
+            // Server configuration section
+            sb.AppendLine("serverAddr = \"" + server + "\"");
+            sb.AppendLine("serverPort = " + serverPort);
+
+            // Authentication
+            sb.AppendLine("auth.method = \"token\"");
+            sb.AppendLine("auth.token = \"" + token + "\"");
             sb.AppendLine();
+
+            // Proxy configurations with unique prefix
+            sb.AppendLine("[[proxies]]");
 
             for (int i = 0; i < locals.Length; i++)
             {
-                sb.AppendLine("[frptray-" + (i + 1) + "]");
-                sb.AppendLine("type = tcp");
-                sb.AppendLine("local_ip = 127.0.0.1");
-                sb.AppendLine("local_port = " + locals[i]);
-                sb.AppendLine("remote_port = " + remotes[i]);
-                sb.AppendLine();
+                if (i > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("[[proxies]]");
+                }
+
+                // Use prefix to create unique proxy names across different clients
+                sb.AppendLine("name = \"" + proxyPrefix + "-" + (i + 1) + "\"");
+                sb.AppendLine("type = \"tcp\"");
+                sb.AppendLine("localIP = \"127.0.0.1\"");
+                sb.AppendLine("localPort = " + locals[i]);
+                sb.AppendLine("remotePort = " + remotes[i]);
             }
+
             return sb.ToString();
         }
     }

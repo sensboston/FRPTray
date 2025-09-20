@@ -32,7 +32,7 @@ namespace FRPTray
             Text = "Settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(Scale(340), Scale(320));
+            ClientSize = new Size(Scale(340), Scale(370));  // Increased height for new field
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
 
             var lblLocal = new Label { Text = "Local ports (CSV, 1-65535):", AutoSize = true, Location = new Point(Scale(10), Scale(10)) };
@@ -50,11 +50,29 @@ namespace FRPTray
             var lblToken = new Label { Text = "Token:", AutoSize = true, Location = new Point(Scale(10), Scale(210)) };
             var txtToken = new TextBox { Location = new Point(Scale(10), Scale(230)), Width = Scale(300), Text = Properties.Settings.Default.Token ?? "" };
 
-            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(260)), Checked = Properties.Settings.Default.RunOnStartup };
-            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(Scale(10), Scale(283)), Checked = Properties.Settings.Default.StartTunnelOnRun };
+            // New proxy prefix field
+            var lblProxyPrefix = new Label { Text = "Proxy prefix (unique per client):", AutoSize = true, Location = new Point(Scale(10), Scale(260)) };
 
-            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(Scale(170), Scale(290)), Size = new Size(Scale(75), Scale(23)) };
-            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Scale(250), Scale(290)), Size = new Size(Scale(75), Scale(23)) };
+            // Get default prefix - use computer name if not set
+            string defaultPrefix = Properties.Settings.Default.ProxyPrefix;
+            if (string.IsNullOrWhiteSpace(defaultPrefix))
+            {
+                defaultPrefix = Environment.MachineName.ToLower().Replace(" ", "-");
+            }
+
+            var txtProxyPrefix = new TextBox
+            {
+                Location = new Point(Scale(10), Scale(280)),
+                Width = Scale(300),
+                Text = defaultPrefix,
+                MaxLength = 50  // Limit prefix length
+            };
+
+            var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(310)), Checked = Properties.Settings.Default.RunOnStartup };
+            var chkStartOnRun = new CheckBox { Text = "Start tunnel on run", AutoSize = true, Location = new Point(Scale(10), Scale(333)), Checked = Properties.Settings.Default.StartTunnelOnRun };
+
+            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(Scale(170), Scale(340)), Size = new Size(Scale(75), Scale(23)) };
+            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Scale(250), Scale(340)), Size = new Size(Scale(75), Scale(23)) };
 
             Controls.AddRange(new Control[]
             {
@@ -63,6 +81,7 @@ namespace FRPTray
                 lblServer, txtServer,
                 lblServerPort, txtServerPort,
                 lblToken, txtToken,
+                lblProxyPrefix, txtProxyPrefix,  // Add new controls
                 chkRunStartup, chkStartOnRun,
                 btnOk, btnCancel
             });
@@ -108,11 +127,36 @@ namespace FRPTray
                     DialogResult = DialogResult.None; return;
                 }
 
+                // Validate proxy prefix
+                var newProxyPrefix = (txtProxyPrefix.Text ?? "").Trim();
+                if (string.IsNullOrEmpty(newProxyPrefix))
+                {
+                    MessageBox.Show("Proxy prefix cannot be empty. Use a unique name for this client.");
+                    DialogResult = DialogResult.None; return;
+                }
+
+                // Sanitize prefix - allow only alphanumeric and dash
+                var sanitizedPrefix = System.Text.RegularExpressions.Regex.Replace(newProxyPrefix, @"[^a-zA-Z0-9\-]", "-").ToLower();
+                if (sanitizedPrefix != newProxyPrefix.ToLower())
+                {
+                    var result = MessageBox.Show(
+                        $"Proxy prefix will be sanitized to: {sanitizedPrefix}\nOnly letters, numbers and dashes are allowed.\n\nContinue?",
+                        "Prefix Sanitization",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+                    if (result != DialogResult.Yes)
+                    {
+                        DialogResult = DialogResult.None;
+                        return;
+                    }
+                }
+
                 Properties.Settings.Default.LocalPort = (txtLocal.Text ?? "").Trim();
                 Properties.Settings.Default.RemotePort = (txtRemote.Text ?? "").Trim();
                 Properties.Settings.Default.Server = newServer;
                 Properties.Settings.Default.ServerPort = newServerPort;
                 Properties.Settings.Default.Token = newToken;
+                Properties.Settings.Default.ProxyPrefix = sanitizedPrefix;  // Save sanitized prefix
                 Properties.Settings.Default.RunOnStartup = chkRunStartup.Checked;
                 Properties.Settings.Default.StartTunnelOnRun = chkStartOnRun.Checked;
                 Properties.Settings.Default.Save();

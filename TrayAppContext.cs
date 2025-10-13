@@ -20,6 +20,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 using Timer = System.Threading.Timer;
 
 namespace FRPTray
@@ -53,6 +54,11 @@ namespace FRPTray
         private readonly Random rng = new Random();
         private int reconnectBackoffMs = 1000;
         private DateTime nextAllowedStartUtc = DateTime.MinValue;
+
+        private SettingsDialog settingsDialog;
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         public TrayAppContext()
         {
@@ -347,26 +353,45 @@ namespace FRPTray
 
         private void OnSettingsClicked(object sender, EventArgs e)
         {
-            using (var dlg = new SettingsDialog())
+            if (settingsDialog == null || settingsDialog.IsDisposed)
             {
-                if (dlg.ShowDialog() != DialogResult.OK) return;
-
-                bool wasRunning = FrpProcess.IsProcessRunning(frpcProcess);
-
-                StartupManager.Set(Properties.Settings.Default.RunOnStartup);
-
-                if (wasRunning)
+                settingsDialog = new SettingsDialog();
+                settingsDialog.FormClosed += (s, ev) =>
                 {
-                    OnStopClicked(this, EventArgs.Empty);
-                    OnStartClicked(this, EventArgs.Empty);
-                }
-                else
-                {
-                    statusText = "not connected";
-                    OnUi(() => UpdateStatusUi(false));
-                }
+                    bool ok = settingsDialog != null && settingsDialog.DialogResult == DialogResult.OK;
+                    settingsDialog = null;
 
-                RebuildCopyMenu();
+                    if (!ok) return;
+
+                    bool wasRunning = FrpProcess.IsProcessRunning(frpcProcess);
+                    StartupManager.Set(Properties.Settings.Default.RunOnStartup);
+
+                    if (wasRunning)
+                    {
+                        OnStopClicked(this, EventArgs.Empty);
+                        OnStartClicked(this, EventArgs.Empty);
+                    }
+                    else
+                    {
+                        statusText = "not connected";
+                        OnUi(() => UpdateStatusUi(false));
+                    }
+
+                    RebuildCopyMenu();
+                };
+
+                settingsDialog.Show();
+            }
+            else
+            {
+                if (settingsDialog.WindowState == FormWindowState.Minimized)
+                    settingsDialog.WindowState = FormWindowState.Normal;
+
+                settingsDialog.BringToFront();
+                settingsDialog.Activate();
+                try { SetForegroundWindow(settingsDialog.Handle); } catch { }
+                settingsDialog.TopMost = true;
+                settingsDialog.TopMost = false;
             }
         }
 

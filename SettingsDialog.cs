@@ -1,13 +1,12 @@
 ﻿/*
- * This file is part of FRPTray project: a lightweight 
- * Windows tray app for managing FRP (frpc) tunnels
- * 
- * https://github.com/sensboston/FRPTray
- *
- * Copyright (c) 2013-2025 SeNSSoFT
- * SPDX-License-Identifier: MIT
- *
- */
+* This file is part of FRPTray project: a lightweight 
+* Windows tray app for managing FRP (frpc) tunnels
+* 
+* https://github.com/sensboston/FRPTray
+*
+* Copyright (c) 2013-2025 SeNSSoFT
+* SPDX-License-Identifier: MIT
+*/
 
 using System;
 using System.Drawing;
@@ -17,6 +16,8 @@ namespace FRPTray
 {
     internal sealed class SettingsDialog : Form
     {
+        private bool centeredOnce;
+
         public SettingsDialog()
         {
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -31,9 +32,11 @@ namespace FRPTray
 
             Text = "Settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(Scale(340), Scale(370));  // Increased height for new field
-            MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            ClientSize = new Size(Scale(340), Scale(370));
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
 
             var lblLocal = new Label { Text = "Local ports (CSV, 1-65535):", AutoSize = true, Location = new Point(Scale(10), Scale(10)) };
             var txtLocal = new TextBox { Location = new Point(Scale(10), Scale(30)), Width = Scale(300), Text = Properties.Settings.Default.LocalPort ?? "" };
@@ -50,10 +53,8 @@ namespace FRPTray
             var lblToken = new Label { Text = "Token:", AutoSize = true, Location = new Point(Scale(10), Scale(210)) };
             var txtToken = new TextBox { Location = new Point(Scale(10), Scale(230)), Width = Scale(300), Text = Properties.Settings.Default.Token ?? "" };
 
-            // New proxy prefix field
             var lblProxyPrefix = new Label { Text = "Proxy prefix (unique per client):", AutoSize = true, Location = new Point(Scale(10), Scale(260)) };
 
-            // Get default prefix - use computer name if not set
             string defaultPrefix = Properties.Settings.Default.ProxyPrefix;
             if (string.IsNullOrWhiteSpace(defaultPrefix))
             {
@@ -65,7 +66,7 @@ namespace FRPTray
                 Location = new Point(Scale(10), Scale(280)),
                 Width = Scale(300),
                 Text = defaultPrefix,
-                MaxLength = 50  // Limit prefix length
+                MaxLength = 50
             };
 
             var chkRunStartup = new CheckBox { Text = "Run on Windows startup", AutoSize = true, Location = new Point(Scale(10), Scale(310)), Checked = Properties.Settings.Default.RunOnStartup };
@@ -81,7 +82,7 @@ namespace FRPTray
                 lblServer, txtServer,
                 lblServerPort, txtServerPort,
                 lblToken, txtToken,
-                lblProxyPrefix, txtProxyPrefix,  // Add new controls
+                lblProxyPrefix, txtProxyPrefix,
                 chkRunStartup, chkStartOnRun,
                 btnOk, btnCancel
             });
@@ -106,37 +107,35 @@ namespace FRPTray
                     DialogResult = DialogResult.None; return;
                 }
 
-                var newServer = (txtServer.Text ?? "").Trim();
+                string newServer = (txtServer.Text ?? "").Trim();
                 if (string.IsNullOrEmpty(newServer))
                 {
                     MessageBox.Show("Server cannot be empty.");
                     DialogResult = DialogResult.None; return;
                 }
 
-                var newServerPort = (txtServerPort.Text ?? "").Trim();
+                string newServerPort = (txtServerPort.Text ?? "").Trim();
                 if (string.IsNullOrEmpty(newServerPort))
                 {
                     MessageBox.Show("Server port cannot be empty.");
                     DialogResult = DialogResult.None; return;
                 }
 
-                var newToken = (txtToken.Text ?? "").Trim();
+                string newToken = (txtToken.Text ?? "").Trim();
                 if (string.IsNullOrEmpty(newToken))
                 {
                     MessageBox.Show("Token cannot be empty.");
                     DialogResult = DialogResult.None; return;
                 }
 
-                // Validate proxy prefix
-                var newProxyPrefix = (txtProxyPrefix.Text ?? "").Trim();
+                string newProxyPrefix = (txtProxyPrefix.Text ?? "").Trim();
                 if (string.IsNullOrEmpty(newProxyPrefix))
                 {
                     MessageBox.Show("Proxy prefix cannot be empty. Use a unique name for this client.");
                     DialogResult = DialogResult.None; return;
                 }
 
-                // Sanitize prefix - allow only alphanumeric and dash
-                var sanitizedPrefix = System.Text.RegularExpressions.Regex.Replace(newProxyPrefix, @"[^a-zA-Z0-9\-]", "-").ToLower();
+                string sanitizedPrefix = System.Text.RegularExpressions.Regex.Replace(newProxyPrefix, @"[^a-zA-Z0-9\-]", "-").ToLower();
                 if (sanitizedPrefix != newProxyPrefix.ToLower())
                 {
                     var result = MessageBox.Show(
@@ -156,11 +155,34 @@ namespace FRPTray
                 Properties.Settings.Default.Server = newServer;
                 Properties.Settings.Default.ServerPort = newServerPort;
                 Properties.Settings.Default.Token = newToken;
-                Properties.Settings.Default.ProxyPrefix = sanitizedPrefix;  // Save sanitized prefix
+                Properties.Settings.Default.ProxyPrefix = sanitizedPrefix;
                 Properties.Settings.Default.RunOnStartup = chkRunStartup.Checked;
                 Properties.Settings.Default.StartTunnelOnRun = chkStartOnRun.Checked;
                 Properties.Settings.Default.Save();
+
+                DialogResult = DialogResult.OK;
+                Close();
             };
+
+            btnCancel.Click += (s, e) =>
+            {
+                DialogResult = DialogResult.Cancel;
+                Close();
+            };
+
+            if (!centeredOnce)
+            {
+                CenterOnCursorScreen();
+                centeredOnce = true;
+            }
+        }
+
+        private void CenterOnCursorScreen()
+        {
+            Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+            int x = wa.Left + (wa.Width - Width) / 2;
+            int y = wa.Top + (wa.Height - Height) / 2;
+            Location = new Point(x, y);
         }
     }
 }
